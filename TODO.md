@@ -15,16 +15,16 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 - [x] Add `LICENSE` (MIT)
 - [x] Add `README.md` (one-screen pitch, run/deploy steps, env list)
 - [x] Add `.env.example` with every var from `CLAUDE.md`
-- [ ] `git init`, first commit
-- [ ] **Verify:** `pnpm dev` boots a blank app on `http://localhost:3000` without errors.
+- [x] `git init`, first commit (`e3c62a4`)
+- [x] **Verify:** `pnpm dev` boots a blank app on `http://localhost:3000` without errors. ✓ Ready in 840ms, HTTP 200.
 
 ## 2. Design tokens & fonts
 
-- [ ] `src/styles/globals.css` — full token set from `DESIGN.md`: colors, radii, spacing, type scale, focus ring
-- [ ] `tailwind.config.ts` — map utilities (`bg-canvas`, `text-secondary`, `radius-pill`, etc.) to vars
-- [ ] Load Geist, Instrument Serif, JetBrains Mono via `next/font` in `app/layout.tsx`
-- [ ] Set `<html>` to `--bg-canvas`, `--text-primary`, `--font-ui` defaults
-- [ ] **Verify:** Drop a `<button>` and `<input>` on the page; confirm colors, focus ring, fonts. No FOUT. No hex literals in any component.
+- [x] `src/app/globals.css` — full token set from `DESIGN.md`: colors, radii, spacing, type scale, focus ring, motion. Lives next to `layout.tsx` (Next 16 + Tailwind 4 convention) rather than `src/styles/`.
+- [x] **Tailwind 4 `@theme` block** — Tailwind 4 uses a CSS-first config; `tailwind.config.ts` is no longer needed. Utilities (`bg-canvas`, `text-primary`, `rounded-pill`, `font-display`, …) are mapped to CSS vars inside `globals.css`.
+- [x] Load Geist, Instrument Serif, JetBrains Mono via `next/font/google` in `app/layout.tsx` with CSS-var bindings (`--font-geist`, `--font-instrument`, `--font-jetbrains`).
+- [x] Set `<html>`/`<body>` to `bg-canvas` + `text-primary` + the Geist UI font default.
+- [x] **Verify:** `pnpm dev` ready in 469ms, `GET / 200`. Token smoke-test page renders wordmark, three surfaces, three button styles, an input, a Monaco-color preview, the empty-state Instrument Serif moment. All target Tailwind utilities (`bg-canvas`, `bg-accent`, `text-primary`, `rounded-pill`, `font-display`, `font-mono`, `border-subtle`, `border-default`, …) compile into the CSS bundle. `pnpm typecheck` clean. Focus ring rule (`*:focus-visible { box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 0 4px var(--accent), 0 0 0 8px var(--accent-glow); }`) emitted.
 
 ## 3. System prompt
 

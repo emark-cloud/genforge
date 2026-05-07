@@ -1,65 +1,86 @@
-import Image from "next/image";
-
+/**
+ * Token smoke-test page. Renders one of each major surface from DESIGN.md so
+ * we can eyeball that colors, fonts, focus ring, and the violet accent all
+ * land correctly before we start composing real components in step 9+.
+ *
+ * Replace this once the workspace shell exists.
+ */
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="flex flex-col items-start gap-8 px-8 py-16 max-w-3xl">
+      {/* Wordmark — Instrument Serif italic with the F slightly oversized */}
+      <h1 className="font-display italic text-display tracking-tight">
+        <span className="inline-block scale-110 origin-bottom-left">G</span>
+        <span>enForge</span>
+      </h1>
+
+      {/* Section label */}
+      <span className="label-caps">Token check</span>
+
+      {/* Surfaces */}
+      <div className="flex flex-col gap-3 w-full">
+        <div className="bg-panel rounded-lg p-5 border border-subtle">
+          panel surface (--bg-panel)
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="bg-card rounded-lg p-5 border border-subtle">
+          card surface (--bg-card)
         </div>
-      </main>
-    </div>
+        <div className="bg-elevated rounded-lg p-5 border border-default">
+          elevated surface (--bg-elevated)
+        </div>
+      </div>
+
+      {/* Buttons */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="h-10 px-5 rounded-pill bg-accent text-on-accent text-base font-medium transition-colors duration-[120ms] hover:bg-accent-hover active:bg-accent-pressed"
+        >
+          Primary CTA
+        </button>
+        <button
+          type="button"
+          className="h-10 px-5 rounded-md bg-card border border-default text-primary text-base font-medium hover:bg-card-hover transition-colors duration-[120ms]"
+        >
+          Secondary
+        </button>
+        <button
+          type="button"
+          className="h-10 px-3 text-secondary text-base hover:text-primary transition-colors duration-[120ms]"
+        >
+          Ghost
+        </button>
+      </div>
+
+      {/* Input */}
+      <input
+        type="text"
+        placeholder="Tab here, then notice the focus ring"
+        className="h-10 w-full px-4 rounded-md bg-card border border-default text-primary placeholder:text-tertiary hover:border-strong transition-colors duration-[120ms]"
+      />
+
+      {/* Mono sample (editor preview) */}
+      <pre className="font-mono text-md text-primary bg-card rounded-lg p-5 border border-subtle w-full">
+        <span style={{ color: "var(--code-comment)" }}>
+          {"# v0.1.0\n# { \"Depends\": \"py-genlayer:1jb45...\" }\n"}
+        </span>
+        <span style={{ color: "var(--code-keyword)" }}>from</span> genlayer{" "}
+        <span style={{ color: "var(--code-keyword)" }}>import</span> *{"\n"}
+        <span style={{ color: "var(--code-decorator)" }}>@gl.public.write</span>
+        {"\n"}
+        <span style={{ color: "var(--code-keyword)" }}>def</span> set_data(
+        <span style={{ color: "var(--code-self)" }}>self</span>, key:{" "}
+        <span style={{ color: "var(--code-keyword)" }}>str</span>):
+      </pre>
+
+      <p className="text-secondary text-base">
+        Body text in <code className="font-mono text-md text-primary">--text-secondary</code>.
+        Empty-state hero below.
+      </p>
+
+      <p className="font-display italic text-display text-secondary">
+        waiting for code
+      </p>
+    </main>
   );
 }

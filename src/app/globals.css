@@ -1,26 +1,200 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────
+   GenForge design tokens.
+   The full set lives on :root so any component can reference them directly
+   via var(--token). The @theme block below maps the curated subset that
+   should be reachable as Tailwind utilities (bg-canvas, text-primary, etc).
+   See DESIGN.md for the source of truth. No hex literals in components —
+   add a token here first.
+   ───────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Canvas / surfaces */
+  --bg-canvas: #0b0b10;
+  --bg-panel: #14141c;
+  --bg-card: #1a1a24;
+  --bg-card-hover: #20202c;
+  --bg-elevated: #24242f;
+
+  /* Borders */
+  --border-subtle: #22222c;
+  --border-default: #2c2c38;
+  --border-strong: #3a3a48;
+
+  /* Text */
+  --text-primary: #ececf1;
+  --text-secondary: #9a9aa8;
+  --text-tertiary: #5e5e6e;
+  --text-on-accent: #ffffff;
+
+  /* Accent — single committed color */
+  --accent: #7c5cff;
+  --accent-hover: #8e72ff;
+  --accent-pressed: #6a4be8;
+  --accent-glow: rgba(124, 92, 255, 0.18);
+  --accent-bg-subtle: rgba(124, 92, 255, 0.08);
+
+  /* Semantic (status only — never decoration) */
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --error: #f87171;
+  --info: var(--accent);
+
+  /* Code editor token colors (Monaco theme: genfix-dark) */
+  --code-keyword: #c792ea;
+  --code-string: #c3e88d;
+  --code-number: #f78c6c;
+  --code-comment: #6e6e80;
+  --code-decorator: #82aaff;
+  --code-self: #ffcb6b;
+  --code-default: var(--text-primary);
+
+  /* Spacing — 8pt grid (4 only for tight icon-text gaps) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Corner radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* Type scale (rem-based, 16px root) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-display: 2.25rem;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Tailwind utility surface. Names here become utilities like `bg-canvas`,
+   `text-primary`, `border-subtle`, `bg-accent`, `font-display`, etc. */
+@theme {
+  /* Backgrounds */
+  --color-canvas: var(--bg-canvas);
+  --color-panel: var(--bg-panel);
+  --color-card: var(--bg-card);
+  --color-card-hover: var(--bg-card-hover);
+  --color-elevated: var(--bg-elevated);
+
+  /* Foreground (text) — `text-primary` / `text-secondary` / `text-tertiary` */
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-on-accent: var(--text-on-accent);
+
+  /* Borders — `border-subtle` etc. Same names also work for bg utilities,
+     but we only use them for borders by convention. */
+  --color-subtle: var(--border-subtle);
+  --color-default: var(--border-default);
+  --color-strong: var(--border-strong);
+
+  /* Accent */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-pressed: var(--accent-pressed);
+
+  /* Status */
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-error: var(--error);
+
+  /* Fonts (variables declared by next/font in layout.tsx) */
+  --font-display: var(--font-instrument), "Times New Roman", serif;
+  --font-ui: var(--font-geist), "Inter", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), "Fira Code", ui-monospace, monospace;
+  --font-sans: var(--font-geist), "Inter", system-ui, sans-serif;
+
+  /* Type sizes — `text-xs` / `text-sm` / ... / `text-display` */
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-md: var(--text-md);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-display: var(--text-display);
+
+  /* Radii */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-pill: var(--radius-pill);
+
+  /* Motion */
+  --ease-out: var(--ease-out);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ─────────────────────────────────────────────────────────────────────────
+   Base layer — global defaults + signature focus ring.
+   ───────────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  html,
+  body {
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+  }
+
+  body {
+    font-family: var(--font-geist), "Inter", system-ui, sans-serif;
+    font-size: var(--text-base);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Focus ring — DESIGN.md "the one place we go bright". Double-ring with
+     a glow halo. Applied via :focus-visible so mouse clicks don't trigger. */
+  *:focus {
+    outline: none;
+  }
+  *:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--bg-canvas),
+      0 0 0 4px var(--accent),
+      0 0 0 8px var(--accent-glow);
+  }
+
+  /* All-caps "section label" pattern from DESIGN.md typography section.
+     Use as <span class="label-caps">WHAT WENT WRONG</span>. */
+  .label-caps {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  /* Selection uses the accent glow so text-select doesn't fight the violet. */
+  ::selection {
+    background: var(--accent-glow);
+    color: var(--text-primary);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Respect motion preferences — strip transitions to instant. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+  }
 }
