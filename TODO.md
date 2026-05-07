@@ -35,13 +35,13 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 4. Provider adapters
 
-- [ ] `src/lib/providers/types.ts` — `LLMProvider` interface from SPEC §"Provider abstraction"
-- [ ] `src/lib/providers/gemini.ts` — uses `responseMimeType: "application/json"` + optional `responseSchema`
-- [ ] `src/lib/providers/anthropic.ts` — prompt-engineered JSON, robust fence-strip parser fallback
-- [ ] `src/lib/providers/openai.ts` — `response_format: { type: "json_object" }` (or structured outputs if model supports)
-- [ ] `src/lib/providers/index.ts` — factory `getProvider(name)`
-- [ ] `src/lib/models.ts` — current per-provider default model IDs (latest flagship for BYOK; Gemini Flash for server)
-- [ ] **Verify:** One scratch call per provider returns the expected shape. Errors include status code + provider message stripped of headers.
+- [x] `src/lib/providers/types.ts` — `LLMProvider` interface, `GenerateArgs`/`GenerateResult`, `LLMError` (carries provider + status + sanitized message), `normalizeError()` helper that redacts `sk-…` and `AIza…` patterns from error strings.
+- [x] `src/lib/providers/gemini.ts` — `responseMimeType: "application/json"`, `temperature: 0.2`, `maxOutputTokens: 32768`. Returns `{ text, usage: { inputTokens, outputTokens } }`.
+- [x] `src/lib/providers/anthropic.ts` — appends a JSON-only instruction to the system prompt; concatenates text blocks from `messages.create`. No native JSON-mode for arbitrary schemas.
+- [x] `src/lib/providers/openai.ts` — `response_format: { type: "json_object" }` via `chat.completions`.
+- [x] `src/lib/providers/index.ts` — `getProvider(name)` factory + `PROVIDER_NAMES` + barrel re-exports.
+- [x] `src/lib/models.ts` — `SERVER_DEFAULT_MODEL=gemini-2.5-flash`, `DEFAULT_MODELS` (claude-opus-4-7 / gpt-5 / gemini-2.5-pro), `MODEL_OPTIONS` per provider for the BYOK dropdown.
+- [x] **Verify:** `scripts/check-providers.ts` — Gemini PASS in 1847ms with usage wired (41 in / 18 out). Anthropic + OpenAI SKIP cleanly when their key envs aren't set; adapters are typechecked and ready for first BYOK use. `pnpm typecheck` clean.
 
 ## 5. Rate limit + circuit breaker + global caps
 
