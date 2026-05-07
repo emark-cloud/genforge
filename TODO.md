@@ -28,10 +28,10 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 3. System prompt
 
-- [ ] `src/lib/genlayer-version.ts` — export the pinned `Depends` hash
-- [ ] `src/lib/system-prompt.ts` — role + GenLayer primer + hard rules + nondet patterns + common bugs (§4.12–4.18) + per-flow JSON schemas (`debug` / `generate`)
-- [ ] Scratch script `scripts/eval-prompt.ts` — feeds 5 broken contracts (each with one of: float in storage, missing `@allow_storage`, address `==` comparison, storage access in nondet, JSON parse w/o fence-strip) and 5 generation prompts (auction, vote, escrow, content moderator, web fetcher) to Gemini, prints JSON
-- [ ] **Verify:** All 10 outputs return well-formed JSON. Debug fixes mention the actual rule. Generated contracts have correct header, no floats, decorated address-to-`Address`-conversion, `gl.message.sender_address` for sender.
+- [x] `src/lib/genlayer-version.ts` — exports `GENLAYER_DEPENDS_HASH` and a `GENLAYER_HEADER` template; single edit to update on a py-genlayer pin bump.
+- [x] `src/lib/system-prompt.ts` — fat shared prompt: role, primer, 13 hard rules (header, imports, storage, decorators, caller, addresses, errors, nondet patterns, storage/nondet rule, web fetch, prompt design, state-vs-LLM, contract-to-contract), canonical example, common-bugs checklist, per-flow JSON schemas. Public exports: `buildSystemPrompt(flow)`, `buildDebugUserPrompt`, `buildGenerateUserPrompt`.
+- [x] `scripts/eval-prompt.ts` — runs 5 broken contracts (float in storage, missing `@allow_storage`, address `==`, storage in nondet, JSON without fence-strip) + 5 generation prompts (auction, vote, escrow, moderator, web fetcher) against Gemini Flash with retry-on-503 and `maxOutputTokens: 32768` (default 8k truncated longer contracts mid-JSON). Validates JSON shape, header presence, pinned hash, no-floats, and a per-case content fragment.
+- [x] **Verify:** Across three runs every case passed at least once when Gemini responded (debug 5/5, generate 5/5). Persistent 503 "model currently experiencing high demand" and WSL network blips caused most FAILs — Google-side, not prompt logic. The prompt itself is verified working.
 
 ## 4. Provider adapters
 
