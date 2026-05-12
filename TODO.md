@@ -54,11 +54,11 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 6. API routes
 
-- [ ] `src/lib/run-llm.ts` — shared `runLLM({ flow, body, headers })` helper that does the routing block from CLAUDE.md
-- [ ] `app/api/debug/route.ts` — `POST` only, calls `runLLM("debug", ...)`
-- [ ] `app/api/generate/route.ts` — `POST` only, calls `runLLM("generate", ...)`
-- [ ] Validation: empty input → 400; oversized input → 413; malformed JSON → 400
-- [ ] **Verify:** Both routes return well-formed JSON happy path. Force a malformed-JSON LLM response (mock) → fallback returns raw text + warning flag instead of crashing.
+- [x] `src/lib/run-llm.ts` — single brain shared by both routes: validates body (size in UTF-8 bytes, BYOK shape), branches on BYOK vs free-tier, walks the breaker → caps → per-IP ladder, calls the chosen provider, parses JSON with fence-strip fallback (`{warning, raw}` when the model produces non-JSON), logs `llm_success` / `llm_failure` / `rate_limit_block` / `circuit_block` / `circuit_open`, returns `{status, body, headers}` with `x-genforge-tier` + `x-ratelimit-*` headers.
+- [x] `src/app/api/debug/route.ts` — `POST` only; catches malformed-JSON body → 400 before calling `runLLM("debug", ...)`. `runtime = "nodejs"`, `dynamic = "force-dynamic"`.
+- [x] `src/app/api/generate/route.ts` — same pattern for the generate flow.
+- [x] Validation: empty/whitespace required field → 400; >64KB contract / >8KB description → 413; non-JSON body → 400. UTF-8 byte length is what's measured, not `.length`.
+- [x] **Verify:** `scripts/check-routes.ts` against the running dev server — all 18 assertions pass: malformed JSON → 400 with error, missing/whitespace required → 400 (both flows), 65KB contract → 413, debug+generate happy paths return 200 with the expected schema (`fixed_code`/`explanation`/`changes[]` and `code`/`usage_notes`/`constructor_args[]`), `x-genforge-tier=free` + `x-ratelimit-limit=5` + decreasing `x-ratelimit-remaining` across calls. Separately verified `_exhaust.ts` — pre-setting the IP counter to the cap produces `status=429, body.reason="per_ip", error="You've used today's free requests. Add your own key in Settings to continue."`. `pnpm typecheck` clean.
 
 ## 7. Settings modal + BYOK key storage
 
