@@ -95,14 +95,36 @@ const DECORATORS = `## Hard rule 4 — Method decorators
 
 Pick exactly one per public method. Internal helpers have no decorator and start with an underscore.`;
 
-const CALLER_AND_VALUE = `## Hard rule 5 — Caller and payment
+const CALLER_AND_VALUE = `## Hard rule 5 — Caller, payment, and time
 
 \`\`\`python
-sender = gl.message.sender_address    # the caller's Address
-value  = gl.message.value             # native token sent (for .payable methods)
+sender   = gl.message.sender_address    # the caller's Address
+value    = gl.message.value             # native token sent (for .payable methods)
+dt       = gl.message.datetime          # ISO-8601 transaction datetime (str)
+chain_id = gl.message.chain_id          # u256
 \`\`\`
 
-Never accept the sender as a parameter from the user — read it from \`gl.message\`.`;
+Never accept the sender as a parameter from the user — read it from \`gl.message\`.
+
+### Time signal — \`gl.message.datetime\` only
+
+py-genlayer does **not** expose \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, or any similar function. The transaction's time is \`gl.message.datetime\` and it's a **string** (ISO-8601). To do arithmetic, parse it with stdlib:
+
+\`\`\`python
+from datetime import datetime, timedelta
+
+# In __init__:
+now = datetime.fromisoformat(gl.message.datetime)
+self.deadline = (now + timedelta(seconds=duration_seconds)).isoformat()  # stored as str
+# or, if you prefer numeric storage:
+self.deadline_epoch = u256(int((now + timedelta(seconds=duration_seconds)).timestamp()))
+
+# Later, to test whether time has passed:
+if datetime.fromisoformat(gl.message.datetime) >= datetime.fromisoformat(self.deadline):
+    ...
+\`\`\`
+
+Storage type for deadlines is your call — \`str\` (the ISO form) is simplest, \`u256\` of a Unix epoch is more compact. **Never** call \`gl.vm.timestamp()\` — it does not exist and the contract will fail to instantiate at deploy with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`.`;
 
 const ADDRESSES = `## Hard rule 6 — Address parameters
 
@@ -186,7 +208,11 @@ Only when output is fully deterministic (e.g., \`json.dumps(..., sort_keys=True)
 
 ### D. \`gl.eq_principle.prompt_comparative(fn, principle="...")\`
 
-LLM-driven equivalence check via the \`EqComparative\` template. Use when validators need to compare leader output to their own re-run under a stated principle.`;
+LLM-driven equivalence check via the \`EqComparative\` template. Use when validators need to compare leader output to their own re-run under a stated principle.
+
+### The umbrella rule for the \`gl.nondet.*\` namespace
+
+**Every** call into the \`gl.nondet.*\` namespace — including the ones that look deterministic, like \`gl.nondet.hash.keccak256\`, \`gl.nondet.web.get\`, and \`gl.nondet.web.render\` — must be reachable from one of the wrappers above (\`run_nondet_unsafe\`, \`prompt_non_comparative\`, \`prompt_comparative\`, or \`strict_eq\`). The namespace name is the consensus contract: anything inside it is treated as needing equivalence-principle resolution, regardless of whether the function happens to produce the same bytes every time. The genvm-lint pass surfaces a stray call as W/E010 ("\`gl.nondet.*\` call not reachable from equivalence principle block"). If you need a deterministic hash inline, wrap it in \`gl.eq_principle.strict_eq(lambda: gl.nondet.hash.keccak256(...))\`.`;
 
 const NONDET_RULES = `## Hard rule 9 — Storage and nondet do not mix
 
@@ -344,7 +370,7 @@ class Reviewer(gl.Contract):
 const COMMON_BUGS = `## Common bugs you must check for and fix
 
 1. **\`float\` anywhere** — replace with \`u256\` (or \`bigint\` for unbounded). Reject prompts that imply float math; scale by a denominator instead.
-2. **Missing \`@allow_storage\`** on a dataclass that's used in storage.
+2. **Missing \`@allow_storage\`** on a class that's used in storage. This applies to **every** class declared in the file that appears as a contract field type or inside a generic storage container (\`TreeMap[K, V]\`, \`DynArray[T]\`, etc.) — dataclasses, plain classes, AND \`Enum\` subclasses. If you write \`class State(Enum): ...\` and then \`state: State\` on the contract, decorate the enum: \`@allow_storage\\nclass State(Enum): ...\`. The genvm-lint pass surfaces this as E104 / E014.
 3. **String-hex comparison of an \`Address\` without lowercasing.** \`Address.__eq__\` already compares raw bytes, so \`addr_a == addr_b\` between two \`Address\` objects is correct without any normalization. The bug is when you compare an \`Address\` against a hex *string* — e.g. a value pulled from JSON, a constructor arg you haven't yet wrapped, or a string from \`gl.nondet.web.get\`. Either coerce both sides to \`Address\` first, or compare lowercase hex on both sides: \`a.as_hex.lower() == b.lower()\`.
 4. **Storage access inside nondet** (\`self.<field>\` referenced in a function passed to \`run_nondet_unsafe\` / \`prompt_non_comparative\` / etc.). Always copy to a local first.
 5. **JSON parsed without fence-stripping** — LLM output may be wrapped in \`\`\`\`json … \`\`\`\`.
@@ -355,7 +381,8 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
 10. **Wrong eq_principle choice** — raw LLM output under \`strict_eq\` will not reach consensus. Use \`prompt_non_comparative\` or \`run_nondet_unsafe\`.
 11. **Unallocated nested TreeMap** — use \`gl.storage.inmem_allocate(TreeMap[K, V])\` the first time you set a value at a parent key.
 12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.
-13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."`;
+13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."
+14. **Hallucinated time API** — \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, etc. do not exist. The deploy will fail at instantiation with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`. Read \`gl.message.datetime\` (ISO-8601 \`str\`) and parse with \`datetime.fromisoformat\` for any temporal logic — see rule 5.`;
 
 const AUTHORITATIVE_SOURCES = `## Authoritative sources
 
