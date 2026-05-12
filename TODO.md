@@ -117,13 +117,13 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 12. Pre-deploy
 
-- [ ] `pnpm build` succeeds with no warnings
-- [ ] `pnpm lint` clean
-- [ ] `pnpm typecheck` clean
-- [ ] Smoke test both flows on free tier (counter advances) and BYOK (each provider) locally
-- [ ] Push to GitHub (open repo, MIT)
-- [ ] Connect Vercel project, add all env vars from `.env.example`
-- [ ] **Verify:** Vercel preview URL passes the same smoke test. Confirm `x-forwarded-for` IP rate limiting actually counts across two networks (e.g., laptop wifi + phone hotspot).
+- [x] `pnpm build` succeeds — `Compiled successfully`, no warnings. Routes emitted: `/`, `/_not-found`, `/api/debug` (ƒ), `/api/generate` (ƒ), `/icon.svg`.
+- [x] `pnpm lint` clean — fixed the three carry-over warnings (unused `e` in `scripts/check-routes.ts:90` and `src/lib/run-llm.ts:233` → bare `catch`; unused `eslint-disable-next-line no-console` in `src/lib/log.ts:53` → removed since the lint config no longer flags `console`).
+- [x] `pnpm typecheck` clean.
+- [x] `.env.example` already lists every var referenced by `runLLM` / `rate-limit` / `circuit` / `log` (`SERVER_LLM_PROVIDER`, `SERVER_LLM_MODEL`, `SERVER_LLM_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `FREE_TIER_DAILY_LIMIT`, `SERVER_LLM_DAILY_REQUEST_CAP`, `SERVER_LLM_DAILY_USD_CAP`, `IP_HASH_SALT`). Vercel project setup = paste these from the local `.env.local`.
+- [x] Push to GitHub — `origin` is `https://github.com/emark-cloud/genforge.git`, MIT, open repo.
+- [ ] Connect Vercel project, add all env vars from `.env.example` (user-side action).
+- [ ] **Verify:** Vercel preview URL passes the smoke test (paste a bad contract → Fix → diff + explanation lands; type a generate prompt → contract + usage notes land; counter advances by 1 each call; gear pulses violet on the 6th call). Confirm `x-forwarded-for` rate limiting counts across two networks (laptop wifi + phone hotspot). (User-side action.)
 
 ---
 

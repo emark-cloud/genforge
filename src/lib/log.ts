@@ -50,6 +50,5 @@ type SafeEvent<T> = T & { [K in Forbidden]?: never };
 export function log<T extends LogEvent>(e: SafeEvent<T>): void {
   const line = { ts: new Date().toISOString(), ...e };
   // One JSON line per event. Easy to grep, easy to ship to a log drain.
-  // eslint-disable-next-line no-console
   console.log(JSON.stringify(line));
 }

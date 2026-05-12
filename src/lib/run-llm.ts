@@ -230,7 +230,7 @@ export async function runLLM(args: Args): Promise<RunResult> {
   let ipHash: string;
   try {
     ipHash = hashedIp(args.headers);
-  } catch (e) {
+  } catch {
     return {
       status: 500,
       body: { error: "server misconfigured: IP_HASH_SALT missing" },

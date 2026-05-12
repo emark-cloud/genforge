@@ -87,7 +87,7 @@ async function main() {
   // Confirm the server is reachable.
   try {
     await fetch(BASE);
-  } catch (e) {
+  } catch {
     console.error(
       `Cannot reach ${BASE}. Start the dev server first: pnpm dev (in another shell).`,
     );
