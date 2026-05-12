@@ -187,6 +187,18 @@
   }
 }
 
+/* Modal entrance — a single 4px lift + fade. No springs (DESIGN motion rules). */
+@keyframes settings-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Respect motion preferences — strip transitions to instant. */
 @media (prefers-reduced-motion: reduce) {
   *,

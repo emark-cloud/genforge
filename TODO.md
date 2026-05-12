@@ -62,11 +62,11 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 7. Settings modal + BYOK key storage
 
-- [ ] `src/lib/keys.ts` — get/set/clear per-provider key + model, SSR-safe, with a "current provider" pointer
-- [ ] `src/components/SettingsModal.tsx` — segmented provider control, three password inputs, model selectors, "Clear key"/"Clear all", quiet "currently using…" footer
-- [ ] Disclaimer copy: "Your key is stored in your browser only."
-- [ ] Modal traps focus, returns focus on close, `Esc` closes
-- [ ] **Verify:** Enter a key, reload — persists. Switch provider, other keys remain. "Clear all" wipes all three. Tab order works, focus ring visible everywhere.
+- [x] `src/lib/keys.ts` — SSR-safe `localStorage` wrapper (`getKey` / `setKey` / `clearKey` / `clearAll` / `getModel` / `setModel` / `getCurrentProvider` / `setCurrentProvider` / `getActiveByok`). First key saved becomes "current" automatically; clearing the current key drops the pointer; unknown model ids rejected.
+- [x] `src/components/SettingsModal.tsx` — segmented Anthropic / OpenAI / Gemini tabs (each shows a dot when a key is saved, violet when active), password input with reveal toggle, per-provider model `<select>`, "Use this provider" action with an "Active" pill when selected, per-provider "Clear" + footer "Clear all", quiet "Currently using your X key (model)" footer that falls back to "Free tier — using GenForge's server key." Disclaimer: "Your key is stored in your browser only — it's sent to GenForge on the single request that uses it and never saved server-side."
+- [x] `Esc` closes; `Tab` / `Shift+Tab` cycles only within the dialog (focus trap); focus restored to the launcher on close. Modal is mounted only while open (`{open && <SettingsModal/>}`) so initial state hydrates from `localStorage` via lazy `useState` — no set-state-in-effect.
+- [x] Temporary `src/components/SettingsLauncher.tsx` button wired into `src/app/page.tsx`; the real topbar gear lands in Step 9.
+- [x] **Verify:** `scripts/check-keys.ts` — 36 assertions against a `Map`-backed `localStorage` mock all pass: starts empty, first-key-saved promotes that provider to current, second key doesn't override current, `setCurrentProvider` rejects providers without a saved key, model selection persists + unknown models rejected, module re-import (= page reload) preserves everything, `clearKey` drops the pointer iff it was the current one, `clearAll` empties storage including the model overrides. `pnpm build` + `pnpm typecheck` + `pnpm lint` clean.
 
 ## 8. Free-tier UI states
 

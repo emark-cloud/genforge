@@ -5,6 +5,8 @@
  *
  * Replace this once the workspace shell exists.
  */
+import { SettingsLauncher } from "@/components/SettingsLauncher";
+
 export default function Home() {
   return (
     <main className="flex flex-col items-start gap-8 px-8 py-16 max-w-3xl">
@@ -50,6 +52,7 @@ export default function Home() {
         >
           Ghost
         </button>
+        <SettingsLauncher />
       </div>
 
       {/* Input */}
