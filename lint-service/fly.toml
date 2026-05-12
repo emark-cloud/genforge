@@ -1,0 +1,37 @@
+# Fly.io config for the GenForge lint microservice.
+# Deploy: `fly launch` once (uses this file), then `fly deploy` thereafter.
+# Set secret: `fly secrets set LINT_SECRET=<long-random-string>` before first deploy.
+
+app = "genforge-lint"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  # min_machines_running = 1 dodges cold start on first request of the day.
+  # Drop to 0 if free-tier minutes become an issue.
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[checks]
+  [checks.healthz]
+    type = "http"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"

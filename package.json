@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:sdk-rules": "node scripts/check-genlayer-rules.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.0",

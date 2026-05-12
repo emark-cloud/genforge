@@ -114,14 +114,20 @@ def set_provider(self, provider: str) -> None:
     self.provider = Address(provider)
 \`\`\`
 
-When **comparing** addresses, never use \`==\` on \`Address\` objects directly — checksum casing differs across environments and a literal compare will fail intermittently on Bradbury. Use the lowercase hex:
+When **comparing** addresses, two \`Address\` objects compare correctly with \`==\` — the SDK's \`Address.__eq__\` compares the raw 20-byte representation, so checksum casing on the hex form doesn't matter. The pitfall is comparing an \`Address\` against a hex *string* — a value pulled from JSON, a constructor arg you haven't yet wrapped, or output from \`gl.nondet.web.get\` — where mixed-case checksums will fail intermittently. Either wrap the string in \`Address(...)\` first, or lowercase both sides of the hex compare:
 
 \`\`\`python
-# WRONG
+# Fine — Address vs Address compares bytes.
 if gl.message.sender_address == self.party_a:
+    ...
 
-# RIGHT
-if gl.message.sender_address.as_hex.lower() == self.party_a.as_hex.lower():
+# Wrong — comparing Address to a string with mixed-case checksum.
+if gl.message.sender_address.as_hex == external_string:
+    ...
+
+# Right — both sides as lowercase hex.
+if gl.message.sender_address.as_hex.lower() == external_string.lower():
+    ...
 \`\`\``;
 
 const ERRORS = `## Hard rule 7 — Errors
@@ -339,7 +345,7 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
 
 1. **\`float\` anywhere** — replace with \`u256\` (or \`bigint\` for unbounded). Reject prompts that imply float math; scale by a denominator instead.
 2. **Missing \`@allow_storage\`** on a dataclass that's used in storage.
-3. **\`Address\` \`==\` comparison** without \`.as_hex.lower()\` on both sides.
+3. **String-hex comparison of an \`Address\` without lowercasing.** \`Address.__eq__\` already compares raw bytes, so \`addr_a == addr_b\` between two \`Address\` objects is correct without any normalization. The bug is when you compare an \`Address\` against a hex *string* — e.g. a value pulled from JSON, a constructor arg you haven't yet wrapped, or a string from \`gl.nondet.web.get\`. Either coerce both sides to \`Address\` first, or compare lowercase hex on both sides: \`a.as_hex.lower() == b.lower()\`.
 4. **Storage access inside nondet** (\`self.<field>\` referenced in a function passed to \`run_nondet_unsafe\` / \`prompt_non_comparative\` / etc.). Always copy to a local first.
 5. **JSON parsed without fence-stripping** — LLM output may be wrapped in \`\`\`\`json … \`\`\`\`.
 6. **\`assert\` / bare \`raise Exception\`** for guards — use \`raise gl.vm.UserError(...)\`.
@@ -348,7 +354,19 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
 9. **Reading sender from a parameter** instead of \`gl.message.sender_address\`.
 10. **Wrong eq_principle choice** — raw LLM output under \`strict_eq\` will not reach consensus. Use \`prompt_non_comparative\` or \`run_nondet_unsafe\`.
 11. **Unallocated nested TreeMap** — use \`gl.storage.inmem_allocate(TreeMap[K, V])\` the first time you set a value at a parent key.
-12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.`;
+12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.
+13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."`;
+
+const AUTHORITATIVE_SOURCES = `## Authoritative sources
+
+These rules are anchored to the pinned py-genlayer SDK. If you find yourself uncertain about a primitive, prefer behaviors observable in:
+
+- \`genlayer/py/types.py\` — \`Address\`, \`u8…u256\`, \`i8…i256\`, \`bigint\`. \`Address.__eq__\` compares raw bytes (\`self._as_bytes == r._as_bytes\`), which is why rule #3 above scopes \`.as_hex.lower()\` to *string* comparisons.
+- \`genlayer/py/storage/__init__.py\` — \`TreeMap\`, \`DynArray\`, \`Array\`, \`@allow_storage\`, and \`inmem_allocate\` (required for nested generic storage).
+- \`genlayer/gl/eq_principle.py\` — \`prompt_non_comparative\`, \`prompt_comparative\`, \`strict_eq\`.
+- \`genlayer/gl/vm.py\` — \`UserError\`, \`run_nondet_unsafe\`.
+
+If the spec asks for something not covered by the rules above, prefer the SDK's documented surface over inventing new patterns.`;
 
 const CORE = [
   ROLE,
@@ -368,6 +386,7 @@ const CORE = [
   CONTRACT_TO_CONTRACT,
   CANONICAL_EXAMPLE,
   COMMON_BUGS,
+  AUTHORITATIVE_SOURCES,
 ].join("\n\n");
 
 // ── Per-flow output schemas ────────────────────────────────────────────────
@@ -397,7 +416,12 @@ Return ONE JSON object, nothing else. No prose before or after, no markdown fenc
   "code": "<the full contract, ready to save as a .py file. Includes the two-line header. Single string with literal \\\\n newlines.>",
   "usage_notes": "<a short markdown block: what the contract does, the calling pattern, what each public method expects, any caveats. 4–10 lines.>",
   "constructor_args": [
-    { "name": "<param name>", "type": "<the Python type as written, e.g. 'str', 'u256', 'list[str]'>", "description": "<one sentence>" }
+    {
+      "name": "<param name>",
+      "type": "<the Python type as written, e.g. 'str', 'u256', 'list[str]'>",
+      "description": "<one sentence>",
+      "example": "<a concrete sample value the deployer can paste into a deploy UI. REQUIRED for Address-typed args — give a valid 0x-prefixed 40-hex-char address. For other types, give a plausible literal (e.g. '100' for u256, 'auction-1' for str, '[]' for empty list).>"
+    }
   ]
 }
 \`\`\``;

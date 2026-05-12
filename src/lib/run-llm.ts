@@ -37,6 +37,22 @@ import {
 import { isOpen, openUntil, recordFailure } from "./circuit";
 import { hashedIp } from "./ip";
 import { log } from "./log";
+import {
+  formatLintForPrompt,
+  lintContract,
+  summarize as summarizeLint,
+  type LintResult,
+} from "./lint";
+
+// Latency floor — if we've already burned this much before post-flight,
+// we skip the retry to leave room for the response itself under Vercel's
+// 60s function cap (see `maxDuration` on the routes).
+const RETRY_DEADLINE_MS = 35_000;
+
+type ProviderCall = (userPromptOverride: string) => Promise<{
+  text: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}>;
 
 // Soft caps. Anything larger is almost certainly noise (or abuse).
 const MAX_CONTRACT_BYTES = 64 * 1024;
@@ -193,6 +209,99 @@ function quotaHeaders(
   return h;
 }
 
+// ── Lint integration helpers ──────────────────────────────────────────────
+
+function combineErrorContext(
+  orig: string | null | undefined,
+  preLint: LintResult | null,
+): string | null {
+  const trimmed = orig?.trim() ?? "";
+  if (!preLint || (preLint.errors.length === 0 && preLint.warnings.length === 0)) {
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  const block = formatLintForPrompt(preLint);
+  return trimmed.length > 0 ? `${trimmed}\n\n${block}` : block;
+}
+
+function extractCode(payload: Record<string, unknown>, flow: Flow): string | null {
+  const key = flow === "debug" ? "fixed_code" : "code";
+  const v = payload[key];
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
+const RETRY_INSTRUCTION =
+  "\n\nThe lint findings above were detected on your previous output. " +
+  "Revise the contract to eliminate every ERROR (and address WARNINGS where reasonable). " +
+  "Re-emit the FULL JSON object per the original schema — do not drop fields, do not add prose.";
+
+/**
+ * Run a single retry against the same provider with lint findings appended
+ * to the user prompt. The retry shares the original rate-limit reservation
+ * (no new ticket pulled) and never trips the free-tier circuit breaker on
+ * failure — the first call already succeeded; lint-driven retry is a quality
+ * pass, not a reliability signal.
+ *
+ * Returns the better of the two attempts; `retryUsage` is set only when the
+ * retry actually replaced the original payload.
+ */
+async function maybeRetry(args: {
+  flow: Flow;
+  callProvider: ProviderCall;
+  userPrompt: string;
+  payload: Record<string, unknown>;
+  postLint: LintResult;
+  t0: number;
+  ipHash: string;
+  tier: "free" | "byok";
+  provider: ProviderName;
+  model: string;
+}): Promise<{
+  payload: Record<string, unknown>;
+  postLint: LintResult;
+  retryUsage?: { inputTokens?: number; outputTokens?: number };
+}> {
+  const { flow, callProvider, userPrompt, payload, postLint, t0, ipHash, tier, provider, model } = args;
+  if (postLint.errors.length === 0) return { payload, postLint };
+  if (Date.now() - t0 >= RETRY_DEADLINE_MS) {
+    log({ event: "llm_retry", ipHash, tier, flow, provider, model, ok: false, reason: "no_time" });
+    return { payload, postLint };
+  }
+  const retryPrompt = userPrompt + "\n\n" + formatLintForPrompt(postLint) + RETRY_INSTRUCTION;
+  try {
+    const retry = await callProvider(retryPrompt);
+    const retryParsed = tryParseJson(retry.text);
+    if (!retryParsed.ok) {
+      log({ event: "llm_retry", ipHash, tier, flow, provider, model, ok: false, reason: "retry_parse" });
+      return { payload, postLint };
+    }
+    const retryCode = extractCode(retryParsed.data, flow);
+    const retryLint = retryCode ? await lintContract(retryCode, { stage: "post" }) : null;
+    if (retryLint && retryLint.errors.length < postLint.errors.length) {
+      log({
+        event: "llm_retry",
+        ipHash, tier, flow, provider, model,
+        ok: true,
+        errorCount: retryLint.errors.length,
+        warnCount: retryLint.warnings.length,
+      });
+      return { payload: retryParsed.data, postLint: retryLint, retryUsage: retry.usage };
+    }
+    log({
+      event: "llm_retry",
+      ipHash, tier, flow, provider, model,
+      ok: false,
+      reason: "no_improvement",
+      errorCount: retryLint?.errors.length,
+    });
+    return { payload, postLint };
+  } catch {
+    // Swallow — the first attempt already succeeded; a failed retry doesn't
+    // change the user's outcome. Don't touch the circuit breaker either.
+    log({ event: "llm_retry", ipHash, tier, flow, provider, model, ok: false, reason: "retry_throw" });
+    return { payload, postLint };
+  }
+}
+
 // ── Core ──────────────────────────────────────────────────────────────────
 
 type Args =
@@ -215,15 +324,27 @@ export async function runLLM(args: Args): Promise<RunResult> {
   }
 
   const body = validated.body;
+  const systemPrompt = buildSystemPrompt(flow);
+
+  // Pre-flight lint on the user-pasted contract (debug only). Findings are
+  // folded into the LLM's error context so the model has the same signal a
+  // careful reviewer would. lintContract returns null on any failure mode
+  // (no URL, timeout, etc.) — pre-lint is purely additive.
+  const preLint =
+    args.flow === "debug"
+      ? await lintContract((body as DebugBody).contract, { stage: "pre" })
+      : null;
+
   const userPrompt =
     args.flow === "debug"
       ? buildDebugUserPrompt({
           contract: (body as DebugBody).contract,
-          errorContext: (body as DebugBody).errorContext ?? null,
+          errorContext: combineErrorContext(
+            (body as DebugBody).errorContext,
+            preLint,
+          ),
         })
       : buildGenerateUserPrompt({ description: (body as GenerateBody).description });
-
-  const systemPrompt = buildSystemPrompt(flow);
 
   // Hash IP up front — used by both tiers for logging, only by free tier
   // for rate-limit keying.
@@ -245,29 +366,52 @@ export async function runLLM(args: Args): Promise<RunResult> {
       body.byok.model ||
       DEFAULT_MODELS[body.byok.provider] ||
       MODEL_OPTIONS[body.byok.provider][0];
-    try {
-      const result = await provider.generate({
-        apiKey: body.byok.key,
+    const byokKey = body.byok.key;
+    const providerName = body.byok.provider;
+    const callProvider: ProviderCall = (overridePrompt) =>
+      provider.generate({
+        apiKey: byokKey,
         model,
         systemPrompt,
-        userPrompt,
+        userPrompt: overridePrompt,
         responseFormat: "json",
       });
+    try {
+      const result = await callProvider(userPrompt);
       const parsed = tryParseJson(result.text);
-      const payload = parsed.ok
+      let payload: Record<string, unknown> = parsed.ok
         ? parsed.data
         : { warning: "model returned non-JSON; raw text included", raw: result.text };
+
+      // Post-LLM lint + optional one-shot retry.
+      let postLint: LintResult | null = null;
+      let usage = result.usage;
+      if (parsed.ok) {
+        const code = extractCode(payload, flow);
+        postLint = code ? await lintContract(code, { stage: "post" }) : null;
+        if (postLint) {
+          const retried = await maybeRetry({
+            flow, callProvider, userPrompt, payload, postLint,
+            t0, ipHash, tier: "byok", provider: providerName, model,
+          });
+          payload = retried.payload;
+          postLint = retried.postLint;
+          if (retried.retryUsage) usage = retried.retryUsage;
+        }
+      }
+      if (postLint) payload.lint = summarizeLint(postLint);
+
       log({
         event: "llm_success",
         ipHash,
         tier: "byok",
         flow,
-        provider: body.byok.provider,
+        provider: providerName,
         model,
         ok: true,
         latencyMs: Date.now() - t0,
-        inputTokens: result.usage?.inputTokens,
-        outputTokens: result.usage?.outputTokens,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
       });
       return {
         status: 200,
@@ -363,18 +507,41 @@ export async function runLLM(args: Args): Promise<RunResult> {
   }
 
   const provider = getProvider("gemini");
-  try {
-    const result = await provider.generate({
+  const freeModel = process.env.SERVER_LLM_MODEL || SERVER_DEFAULT_MODEL;
+  const callProvider: ProviderCall = (overridePrompt) =>
+    provider.generate({
       apiKey: serverKey,
-      model: process.env.SERVER_LLM_MODEL || SERVER_DEFAULT_MODEL,
+      model: freeModel,
       systemPrompt,
-      userPrompt,
+      userPrompt: overridePrompt,
       responseFormat: "json",
     });
+  try {
+    const result = await callProvider(userPrompt);
     const parsed = tryParseJson(result.text);
-    const payload = parsed.ok
+    let payload: Record<string, unknown> = parsed.ok
       ? parsed.data
       : { warning: "model returned non-JSON; raw text included", raw: result.text };
+
+    // Post-LLM lint + optional one-shot retry. The retry shares the same
+    // rate-limit reservation pulled above — no second checkAndReserve. A
+    // retry failure also does NOT trip the circuit breaker (see maybeRetry).
+    let postLint: LintResult | null = null;
+    let usage = result.usage;
+    if (parsed.ok) {
+      const code = extractCode(payload, flow);
+      postLint = code ? await lintContract(code, { stage: "post" }) : null;
+      if (postLint) {
+        const retried = await maybeRetry({
+          flow, callProvider, userPrompt, payload, postLint,
+          t0, ipHash, tier: "free", provider: "gemini", model: freeModel,
+        });
+        payload = retried.payload;
+        postLint = retried.postLint;
+        if (retried.retryUsage) usage = retried.retryUsage;
+      }
+    }
+    if (postLint) payload.lint = summarizeLint(postLint);
 
     // Fire-and-forget USD top-up. Pricing wires in later; until then
     // this is a no-op (recordUsageCost ignores zero).
@@ -386,11 +553,11 @@ export async function runLLM(args: Args): Promise<RunResult> {
       tier: "free",
       flow,
       provider: "gemini",
-      model: process.env.SERVER_LLM_MODEL || SERVER_DEFAULT_MODEL,
+      model: freeModel,
       ok: true,
       latencyMs: Date.now() - t0,
-      inputTokens: result.usage?.inputTokens,
-      outputTokens: result.usage?.outputTokens,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
     });
     return {
       status: 200,

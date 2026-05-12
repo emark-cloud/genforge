@@ -20,9 +20,11 @@ export type LogEvent = {
     | "llm_request"
     | "llm_success"
     | "llm_failure"
+    | "llm_retry"
     | "rate_limit_block"
     | "circuit_open"
-    | "circuit_block";
+    | "circuit_block"
+    | "lint";
   /** ISO-8601 timestamp set by the logger. */
   ts?: string;
   /** Hashed client IP (see `lib/ip.ts`). Never the raw IP. */
@@ -39,6 +41,11 @@ export type LogEvent = {
   outputTokens?: number;
   /** Sanitized short reason, e.g. "free_tier_exhausted" or "provider_5xx". */
   reason?: string;
+  /** Lint event only — counts of issues, never the messages themselves. */
+  errorCount?: number;
+  warnCount?: number;
+  /** Lint event only — which side of the pipeline this lint ran on. */
+  stage?: "pre" | "post";
 };
 
 /** Generic catch for accidental forbidden keys. The intersection with

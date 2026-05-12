@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Tabs, type TabId } from "./Tabs";
 import { FreeTierIndicator } from "./FreeTierIndicator";
 import { SettingsLauncher } from "./SettingsLauncher";
@@ -29,10 +30,16 @@ export function Topbar({ activeTab, onTabChange, byok, quota }: Props) {
     >
       <div className="grid h-full grid-cols-[1fr_auto_1fr] items-center px-[var(--space-5)]">
         <div className="flex items-center">
-          <span className="font-display italic text-xl tracking-tight text-primary select-none">
-            <span className="inline-block scale-110 origin-bottom-left">G</span>
-            <span>enForge</span>
-          </span>
+          <Link
+            href="/"
+            aria-label="GenForge — back to landing"
+            className="select-none rounded-[var(--radius-sm)] transition-opacity duration-[var(--duration-fast)] hover:opacity-80"
+          >
+            <span className="font-display italic text-xl tracking-tight text-primary">
+              <span className="inline-block scale-110 origin-bottom-left">G</span>
+              <span>enForge</span>
+            </span>
+          </Link>
         </div>
         <Tabs active={activeTab} onChange={onTabChange} />
         <div className="flex items-center justify-end gap-[var(--space-4)]">

@@ -41,7 +41,8 @@ app/
     generate/route.ts ← POST: description → contract
 
 src/
-  components/         ← Topbar, Rail, Tabs, Editor, DiffView, SettingsModal, ...
+  components/         ← Topbar, Rail, Tabs, Editor, DiffView, SettingsModal,
+                       LintPill, ...
   lib/
     providers/        ← anthropic.ts, openai.ts, gemini.ts, index.ts (factory)
     rate-limit.ts     ← Upstash IP + global counters + USD est
@@ -50,26 +51,48 @@ src/
     genlayer-version.ts ← pinned py-genlayer Depends hash
     models.ts         ← per-provider default models
     keys.ts           ← BYOK localStorage helpers (SSR-safe)
+    lint.ts           ← client for the genvm-lint microservice (fail-open)
+    run-llm.ts        ← request pipeline: validate → pre-lint → LLM →
+                       post-lint → 1-retry → respond
   styles/globals.css  ← color/spacing/type tokens (DESIGN.md → CSS vars)
+
+lint-service/         ← Python FastAPI microservice wrapping `genvm-lint check`.
+                       Deployed separately (Fly.io). See lint-service/README.md.
 ```
 
 ### Request routing (every `/api/debug` and `/api/generate` call)
 
 ```
 1. Parse body → { contract|description, errorContext?, byok?: {provider, key, model} }
-2. If BYOK key present → use providers[byok.provider].generate({ apiKey: byok.key, ... }) (unlimited).
-3. Else (free tier):
+2. PRE-FLIGHT LINT (debug only, optional). If LINT_SERVICE_URL/SECRET are
+   set, POST the user's contract to the microservice. Findings are folded
+   into errorContext so the LLM has the same signal a reviewer would.
+   Fail-open: any failure (unset, timeout, non-2xx) is silently ignored.
+3. If BYOK key present → use providers[byok.provider].generate({ apiKey: byok.key, ... }) (unlimited).
+4. Else (free tier):
    a. Circuit breaker check → if open, 503.
    b. Global daily caps (req count + USD est) → if exceeded, 429.
    c. Per-IP daily limit → if exceeded, 429.
    d. Increment counters, then call Gemini Flash with SERVER_LLM_KEY.
    e. On 5xx → record breaker failure.
-4. Parse JSON output (strip markdown fences first — see GUIDELINES §4.14).
-5. Log: timestamp, hashed-IP, tier, provider, success, tokens, latency. NEVER prompt/response/key.
-6. Return JSON to client.
+5. Parse JSON output (strip markdown fences first — see GUIDELINES §4.14).
+6. POST-FLIGHT LINT on the model's `fixed_code` / `code`. If it reports
+   errors AND `Date.now() - t0 < 35_000`, re-invoke the SAME provider once
+   with the lint findings appended to the user prompt. The retry shares
+   the original rate-limit reservation (no second ticket pulled) and does
+   NOT trip the circuit breaker on failure — the first call already
+   succeeded; lint-driven retry is a quality pass, not a reliability one.
+   Whichever attempt produces the cleaner lint result is returned.
+7. Log: timestamp, hashed-IP, tier, provider, success, tokens, latency,
+   plus `event:"lint"` entries (counts only — never the source) and
+   `event:"llm_retry"` when applicable. NEVER prompt/response/key.
+8. Return JSON to client, with `lint: { ok, errorCount, warnCount, issues }`
+   attached when the post-flight lint ran.
 ```
 
 IP detection: first hop of `x-forwarded-for` (Vercel-correct). Hash with sha256 + `IP_HASH_SALT` before logging.
+
+`export const maxDuration = 60` on both routes — pre-lint + LLM + post-lint + 1 retry can occasionally exceed Hobby's default 10s ceiling.
 
 ## Hard rules for this codebase
 
@@ -106,6 +129,9 @@ See `.env.example`. Summary:
 | `SERVER_LLM_DAILY_REQUEST_CAP` | Global daily request ceiling for the free tier. |
 | `SERVER_LLM_DAILY_USD_CAP` | Global daily USD ceiling for the free tier. |
 | `IP_HASH_SALT` | Salt for sha256 hashing IPs in logs. |
+| `LINT_SERVICE_URL` | Base URL of the genvm-lint microservice. Optional — runLLM is fail-open if unset. |
+| `LINT_SERVICE_SECRET` | Shared bearer secret for the lint service (sent as `X-Lint-Secret`). Must match `fly secrets`. |
+| `LINT_TIMEOUT_MS` | Client-side per-request timeout against the lint service. Default `5000`. |
 
 ## Out of scope for v1 (do not add without discussion)
 

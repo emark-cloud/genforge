@@ -48,3 +48,6 @@ next-env.d.ts
 # frontend audit artifacts (script runs locally; screenshots + report are
 # byproducts, not source)
 /audit/
+
+# python bytecode (the lint-service uses py3; never commit caches)
+__pycache__/

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, Eye, EyeOff, X } from "lucide-react";
 import type { ProviderName } from "@/lib/providers/types";
 import { DEFAULT_MODELS, MODEL_OPTIONS } from "@/lib/models";
@@ -155,7 +156,9 @@ export function SettingsModal({ onClose, onChange }: Props) {
     return `Currently using your ${PROVIDER_LABEL[active]} key (${models[active]}).`;
   }, [active, models]);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center px-[var(--space-4)]"
       role="presentation"
@@ -353,6 +356,7 @@ export function SettingsModal({ onClose, onChange }: Props) {
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
