@@ -13,7 +13,9 @@ Validate shells out to pyright, which cold-starts in ~40s on Docker's overlayfs.
 - `POST /lint` — `{ "contract": "<python source>" }` → `{ ok, errors[], warnings[], raw }`. Requires header `X-Lint-Secret: <shared secret>`.
 - `GET /healthz` — liveness probe.
 
-Body cap 64 KiB, lint timeout 8s, raw output truncated to 4 KiB, issue arrays capped at 50.
+Body cap 64 KiB, lint timeout 12s, raw output truncated to 4 KiB, issue arrays capped at 50.
+
+`/lint` serializes the subprocess call via an in-process semaphore (`LINT_CONCURRENCY`, default 2) and fails fast as `503` if a slot doesn't free up within `LINT_QUEUE_WAIT_S` (default 4s). Right-sized for `shared-cpu-1x`; bump both — plus the matching `http_service.concurrency` limits in `fly.toml` — if you scale the vm.
 
 ## Local run
 

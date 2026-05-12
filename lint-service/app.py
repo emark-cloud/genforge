@@ -13,6 +13,7 @@ Auth: shared secret via the X-Lint-Secret header. Reject otherwise.
 Logging: status only — never the source, never the secret.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -39,6 +40,33 @@ MAX_ISSUES = 50
 # a real result or a clean 504 from us rather than aborting first.
 LINT_TIMEOUT_S = float(os.environ.get("LINT_TIMEOUT_S", "12"))
 GENVM_LINT_BIN = os.environ.get("GENVM_LINT_BIN", "genvm-lint")
+
+# In-process subprocess concurrency cap. Each /lint call shells out a
+# CPU-bound `genvm-lint check` (~1.7–3s warm). On shared-cpu-1x there's
+# only one vCPU, so N concurrent subprocesses each take roughly N×
+# longer and quickly blow past LINT_TIMEOUT_S. The semaphore serializes
+# the heavyweight call without serializing the rest of the handler
+# (auth, body parsing, response shaping all stay free). Pair this with
+# fly.toml's http_service.concurrency.soft_limit so Fly autoscales when
+# the in-process queue starts filling instead of piling onto one box.
+LINT_CONCURRENCY = int(os.environ.get("LINT_CONCURRENCY", "2"))
+# How long to wait for a semaphore slot before failing fast as 503.
+# Without this, queued requests could outlive their callers indefinitely
+# and clog the queue with abandoned work. Default 4s — enough to ride
+# out a single in-flight subprocess on a warm path; beyond that, the
+# correct signal is "we're saturated, retry."
+LINT_QUEUE_WAIT_S = float(os.environ.get("LINT_QUEUE_WAIT_S", "4"))
+
+# Lazy-initialized so the semaphore binds to whichever event loop uvicorn
+# ends up running (avoids the "no current event loop" trap on import).
+_subprocess_sem: asyncio.Semaphore | None = None
+
+
+def _get_sem() -> asyncio.Semaphore:
+    global _subprocess_sem
+    if _subprocess_sem is None:
+        _subprocess_sem = asyncio.Semaphore(LINT_CONCURRENCY)
+    return _subprocess_sem
 
 WARMUP_SOURCE = '''# v0.1.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
@@ -147,28 +175,49 @@ async def lint(request: Request, x_lint_secret: str | None = Header(default=None
 
     t0 = time.monotonic()
     raw = ""
+
+    # Acquire a subprocess slot. Fail fast as 503 if the queue is backed
+    # up beyond LINT_QUEUE_WAIT_S — better signal to the caller than
+    # holding the request open and racing the client's own timeout.
+    sem = _get_sem()
     try:
-        with temp_contract(source) as path:
-            proc = subprocess.run(
-                [GENVM_LINT_BIN, "check", path, "--json"],
-                capture_output=True,
-                text=True,
-                timeout=LINT_TIMEOUT_S,
-            )
-        raw = (proc.stdout or proc.stderr or "")[:MAX_RAW_BYTES]
-        if not proc.stdout.strip():
-            log.error("lint produced no stdout; rc=%s", proc.returncode)
-            raise HTTPException(status_code=502, detail="lint produced no output")
-        parsed = json.loads(proc.stdout)
-    except subprocess.TimeoutExpired:
-        log.warning("lint timeout after %.1fs", LINT_TIMEOUT_S)
-        raise HTTPException(status_code=504, detail="lint timeout")
-    except json.JSONDecodeError:
-        log.error("lint stdout was not valid JSON")
-        raise HTTPException(status_code=502, detail="lint output unparseable")
-    except FileNotFoundError:
-        log.error("genvm-lint binary not found")
-        raise HTTPException(status_code=500, detail="linter unavailable")
+        await asyncio.wait_for(sem.acquire(), timeout=LINT_QUEUE_WAIT_S)
+    except asyncio.TimeoutError:
+        log.warning("lint queue saturated; waited %.1fs", LINT_QUEUE_WAIT_S)
+        raise HTTPException(status_code=503, detail="lint queue saturated; retry")
+    queue_wait_ms = int((time.monotonic() - t0) * 1000)
+
+    try:
+        try:
+            with temp_contract(source) as path:
+                # Run the blocking subprocess on a worker thread so the
+                # event loop stays free to serve healthchecks and queue
+                # the next request. asyncio.to_thread propagates the
+                # subprocess exceptions (TimeoutExpired, FileNotFoundError)
+                # back up unchanged.
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    [GENVM_LINT_BIN, "check", path, "--json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=LINT_TIMEOUT_S,
+                )
+            raw = (proc.stdout or proc.stderr or "")[:MAX_RAW_BYTES]
+            if not proc.stdout.strip():
+                log.error("lint produced no stdout; rc=%s", proc.returncode)
+                raise HTTPException(status_code=502, detail="lint produced no output")
+            parsed = json.loads(proc.stdout)
+        except subprocess.TimeoutExpired:
+            log.warning("lint timeout after %.1fs (queue_wait_ms=%d)", LINT_TIMEOUT_S, queue_wait_ms)
+            raise HTTPException(status_code=504, detail="lint timeout")
+        except json.JSONDecodeError:
+            log.error("lint stdout was not valid JSON")
+            raise HTTPException(status_code=502, detail="lint output unparseable")
+        except FileNotFoundError:
+            log.error("genvm-lint binary not found")
+            raise HTTPException(status_code=500, detail="linter unavailable")
+    finally:
+        sem.release()
 
     if "lint" not in parsed or "validate" not in parsed:
         log.error("lint output schema unexpected — missing 'lint' or 'validate'")
@@ -178,7 +227,7 @@ async def lint(request: Request, x_lint_secret: str | None = Header(default=None
     result["raw"] = raw[:MAX_RAW_BYTES]
     duration_ms = int((time.monotonic() - t0) * 1000)
     log.info(
-        "lint ok=%s errors=%d warnings=%d duration_ms=%d",
-        result["ok"], len(result["errors"]), len(result["warnings"]), duration_ms,
+        "lint ok=%s errors=%d warnings=%d duration_ms=%d queue_wait_ms=%d",
+        result["ok"], len(result["errors"]), len(result["warnings"]), duration_ms, queue_wait_ms,
     )
     return JSONResponse(result)
