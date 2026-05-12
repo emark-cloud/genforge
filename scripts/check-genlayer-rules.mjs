@@ -47,6 +47,53 @@ async function assertFile(path, asserts) {
   }
 }
 
+// Curated source files watched by the reference generator (kept in sync
+// with the modules read by scripts/gen_sdk_reference.py — if you change
+// one, change the other).
+const REF_SOURCES = [
+  "_internal/msg.py",
+  "gl/vm.py",
+  "gl/eq_principle.py",
+  "gl/nondet/__init__.py",
+  "gl/nondet/web.py",
+  "py/types.py",
+  "py/storage/__init__.py",
+  "py/storage/tree_map.py",
+  "py/storage/vec.py",
+];
+
+async function checkSdkReference(stdDir, expectedHash) {
+  const refPath = new URL("../src/lib/sdk-reference.ts", import.meta.url);
+  const src = await readFile(refPath, "utf8").catch(() => null);
+  if (src == null) {
+    fail(`src/lib/sdk-reference.ts missing — run \`pnpm gen:sdk-reference\``);
+    return;
+  }
+  const m = src.match(/SDK_REFERENCE_HASH\s*=\s*"([a-z0-9]+)"/);
+  if (!m) {
+    fail(`src/lib/sdk-reference.ts has no SDK_REFERENCE_HASH constant — regenerate`);
+    return;
+  }
+  if (m[1] !== expectedHash) {
+    fail(
+      `src/lib/sdk-reference.ts pin (${m[1].slice(0, 8)}…) != GENLAYER_DEPENDS_HASH (${expectedHash.slice(0, 8)}…) — run \`pnpm gen:sdk-reference\``,
+    );
+    return;
+  }
+  const refStat = await stat(refPath).catch(() => null);
+  if (!refStat) return;
+  // Freshness: if any curated source has been touched since the reference
+  // was generated, the reference is stale.
+  let latest = 0;
+  for (const rel of REF_SOURCES) {
+    const s = await stat(join(stdDir, rel)).catch(() => null);
+    if (s && s.mtimeMs > latest) latest = s.mtimeMs;
+  }
+  if (latest > refStat.mtimeMs) {
+    fail(`src/lib/sdk-reference.ts is older than the SDK source — run \`pnpm gen:sdk-reference\``);
+  }
+}
+
 async function main() {
   const hash = await readPinnedHash();
   const versionDir = await pickVersionDir();
@@ -83,7 +130,11 @@ async function main() {
     { needle: /prompt_non_comparative/, hint: "eq_principle.prompt_non_comparative missing (rule #10, canonical example)" },
   ]);
 
-  // 6. Output.
+  // 6. sdk-reference.ts: must exist, must pin the same hash as the SDK, and
+  //    must be no older than every curated source file. Drift = run gen.
+  await checkSdkReference(stdDir, hash);
+
+  // 7. Output.
   if (errors.length > 0) {
     console.error(`check-genlayer-rules: ${errors.length} drift(s) detected`);
     for (const e of errors) console.error(`  - ${e}`);

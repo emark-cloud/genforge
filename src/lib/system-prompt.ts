@@ -12,6 +12,7 @@
  */
 
 import { GENLAYER_DEPENDS_HASH } from "./genlayer-version";
+import { SDK_REFERENCE } from "./sdk-reference";
 
 export type Flow = "debug" | "generate";
 
@@ -403,8 +404,9 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
 11. **Unallocated nested TreeMap** — use \`gl.storage.inmem_allocate(TreeMap[K, V])\` the first time you set a value at a parent key.
 12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.
 13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."
-14. **Hallucinated time API** — \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, etc. do not exist. The deploy will fail at instantiation with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`. Read \`gl.message.datetime\` (ISO-8601 \`str\`) and parse with \`datetime.fromisoformat\` for any temporal logic — see rule 5.
-15. **Hallucinated \`Address\` helpers** — \`Address.zero()\`, \`Address.null()\`, \`Address.empty()\` do **not** exist on the SDK's \`Address\` class. The only constructor is \`Address(val: str | bytes)\`. When you need a sentinel "no address yet," use the all-zero literal \`Address("0x" + "00" * 20)\` (or just \`Address("0x0000000000000000000000000000000000000000")\`), or — usually cleaner — sidestep the sentinel by tracking the state with a separate \`bool\` flag (e.g., \`winner_set: bool\`).`;
+14. **Hallucinated APIs.** If an identifier (function, attribute, classmethod, module path) does not appear in the **SDK reference** section below, it does not exist. Common cases: \`gl.vm.timestamp()\`, \`gl.block.*\`, \`gl.now()\` (use \`gl.message.datetime\` instead); \`Address.zero()\`, \`Address.null()\`, \`Address.empty()\` (use the all-zero literal \`Address("0x" + "00" * 20)\` or a \`bool\` sentinel flag). When in doubt, reach for something listed in the SDK reference and restructure if needed.`;
+
+const SDK_REF = `${SDK_REFERENCE}`;
 
 const AUTHORITATIVE_SOURCES = `## Authoritative sources
 
@@ -435,6 +437,7 @@ const CORE = [
   CONTRACT_TO_CONTRACT,
   CANONICAL_EXAMPLE,
   COMMON_BUGS,
+  SDK_REF,
   AUTHORITATIVE_SOURCES,
 ].join("\n\n");
 
