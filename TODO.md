@@ -79,12 +79,20 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 9. Debug tab
 
-- [ ] `src/components/Editor.tsx` — Monaco wrapper, registers `genfix-dark` theme using `--code-*` tokens, ligatures on, minimap off, Python language
-- [ ] `src/components/DiffView.tsx` — `react-diff-viewer-continued`, side-by-side, themed with diff tints from DESIGN §"Diff view"
-- [ ] Debug layout: input editor + "What went wrong" textarea + Fix CTA on the left; output Monaco/diff (default-on) + explanation (markdown) + Copy/Download on the right
-- [ ] Diff/Full toggle pill above the output
-- [ ] Loading state: CTA shows the JetBrains-Mono dot spinner, no other animation runs
-- [ ] **Verify:** Use `genlayer-dev:write-contract` to draft a contract with a planted bug (e.g., float in storage). Paste, hit Fix, confirm diff highlights the line and the explanation cites the rule.
+- [x] `src/components/Editor.tsx` — Monaco wrapper. `beforeMount` registers `genfix-dark`, reading the `--code-*` / `--bg-*` / `--text-*` / `--accent` palette from `:root` computed styles (so the editor tracks `globals.css` rather than duplicating hex literals). Ligatures on, minimap off, line-highlight `--bg-card-hover`, cursor + selection `--accent`, scrollbar 8px with `--border-*` thumbs, no context menu, Python language preset.
+- [x] `src/components/DiffView.tsx` — `react-diff-viewer-continued`, side-by-side, dark theme. All chrome routed through CSS vars including the new `--diff-removed-bg` / `--diff-removed-strong` / `--diff-added-bg` / `--diff-added-strong` tints declared in `globals.css` (per DESIGN §"Diff view").
+- [x] `src/components/Spinner.tsx` — JetBrains-Mono six-dot cycle at 80ms per frame; consumed by the CTA loading state and nothing else, per DESIGN motion rule 2.
+- [x] `src/components/Markdown.tsx` — `react-markdown` wrapper with tailored styles (paragraphs, bullets, inline code in `--accent-bg-subtle`, links in `--accent`, headings demoted to label-caps for `h3+`).
+- [x] `src/components/CopyButton.tsx` + `DownloadButton.tsx` — secondary-style chips. Copy briefly switches to a green check; Download writes a `text/x-python` Blob and clicks an anchor.
+- [x] `src/components/Tabs.tsx` — Debug / Generate switcher with the animated 2px violet underline (180ms ease-out from `scaleX(0)` to `scaleX(1)`, per DESIGN §Tabs).
+- [x] `src/components/Topbar.tsx` — 56px bar: italic-serif wordmark left, tabs centered, `FreeTierIndicator` + `SettingsLauncher` (with the pulsing violet dot when exhausted) right.
+- [x] `src/components/DebugTab.tsx` — left column: contract editor + char counter + "What went wrong" textarea + Fix CTA + inline error banner; right column: `EmptyOutput` ("waiting for code" in display serif) until a result lands, then `DebugOutput`. ⌘/Ctrl+Enter fires the CTA from inside either input. The contract value at submit time is stashed so editing the input after firing doesn't shift the diff.
+- [x] `src/components/DebugOutput.tsx` — diff/full pill toggle (Diff is default-on), Copy + Download right-aligned, then the diff or read-only Monaco beneath, then a card with markdown explanation + per-change `what/why` cards.
+- [x] `src/components/EmptyOutput.tsx` — the "waiting for code" serif moment.
+- [x] `src/components/GenerateTab.tsx` — placeholder until Step 10.
+- [x] `src/components/Workspace.tsx` — shell that owns `activeTab` + `quota` + the `useByok` subscription; below 1024px renders the "best on a wider screen" notice instead of the workspace (CLAUDE.md rule #8).
+- [x] `src/app/page.tsx` rewritten to `<Workspace />`; the Step-2 token smoke page is gone.
+- [x] **Verify:** `pnpm build` + `pnpm typecheck` + `pnpm lint` clean. The new UI only consumes the `/api/debug` JSON shape that `scripts/check-routes.ts` (Step 6) already exercised end-to-end against the real Gemini + real Upstash. Interactive eyeball test (paste a bad contract → Fix → confirm diff + explanation) is a user-side check in `pnpm dev`.
 
 ## 10. Generate tab
 

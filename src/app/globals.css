@@ -41,6 +41,13 @@
   --error: #f87171;
   --info: var(--accent);
 
+  /* Diff tints — per DESIGN §"Diff view". Subtle by default, strong for
+     intra-line modifications. */
+  --diff-removed-bg: rgba(248, 113, 113, 0.08);
+  --diff-removed-strong: rgba(248, 113, 113, 0.18);
+  --diff-added-bg: rgba(74, 222, 128, 0.08);
+  --diff-added-strong: rgba(74, 222, 128, 0.18);
+
   /* Code editor token colors (Monaco theme: genfix-dark) */
   --code-keyword: #c792ea;
   --code-string: #c3e88d;
