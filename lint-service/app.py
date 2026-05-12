@@ -30,9 +30,14 @@ MAX_BODY_BYTES = 64 * 1024
 MAX_RAW_BYTES = 4 * 1024
 MAX_ISSUES = 50
 # Server-side timeout. genvm-lint cold-starts at ~7s (pyright + SDK load)
-# and warms to ~3s. Keep this above the GenForge client's per-request
-# timeout so the client wins the race when traffic is bursty.
-LINT_TIMEOUT_S = float(os.environ.get("LINT_TIMEOUT_S", "8"))
+# and warms to ~1.7–3s. Default 12s gives ~4× warm headroom for tail
+# latency on larger contracts (E025/E026 call-graph analysis grows with
+# method count) and absorbs cold paths when the warmup thread hasn't
+# completed before the first request. The GenForge client's per-request
+# timeout (LINT_TIMEOUT_MS) should be set ≥ this value plus a small
+# network slack (~1s), so the client waits long enough to receive either
+# a real result or a clean 504 from us rather than aborting first.
+LINT_TIMEOUT_S = float(os.environ.get("LINT_TIMEOUT_S", "12"))
 GENVM_LINT_BIN = os.environ.get("GENVM_LINT_BIN", "genvm-lint")
 
 WARMUP_SOURCE = '''# v0.1.0

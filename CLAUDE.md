@@ -131,7 +131,7 @@ See `.env.example`. Summary:
 | `IP_HASH_SALT` | Salt for sha256 hashing IPs in logs. |
 | `LINT_SERVICE_URL` | Base URL of the genvm-lint microservice. Optional — runLLM is fail-open if unset. |
 | `LINT_SERVICE_SECRET` | Shared bearer secret for the lint service (sent as `X-Lint-Secret`). Must match `fly secrets`. |
-| `LINT_TIMEOUT_MS` | Client-side per-request timeout against the lint service. Default `5000`. |
+| `LINT_TIMEOUT_MS` | Client-side per-request timeout against the lint service. Default `13000` — set ≥ the service's `LINT_TIMEOUT_S` (default `12s`) plus ~1s network slack, so the client waits long enough for a real result or a clean 504 from the server. |
 
 ## Out of scope for v1 (do not add without discussion)
 
