@@ -101,31 +101,39 @@ const CALLER_AND_VALUE = `## Hard rule 5 — Caller, payment, and time
 \`\`\`python
 sender   = gl.message.sender_address    # the caller's Address
 value    = gl.message.value             # native token sent (for .payable methods)
-dt       = gl.message.datetime          # ISO-8601 transaction datetime (str)
-chain_id = gl.message.chain_id          # u256
+contract = gl.message.contract_address  # this contract's own Address
+origin   = gl.message.origin_address    # the original transaction initiator
+chain    = gl.message.chain_id          # u256
+
+# Time, deploy flag, call stack: ON gl.message_raw (a TypedDict, bracket access)
+dt       = gl.message_raw['datetime']   # ISO-8601 transaction datetime (str)
+is_init  = gl.message_raw['is_init']    # bool — True during the deploy call
+stack    = gl.message_raw['stack']      # list[Address]
 \`\`\`
 
-Never accept the sender as a parameter from the user — read it from \`gl.message\`.
+\`gl.message\` (NamedTuple, attribute access) and \`gl.message_raw\` (TypedDict, bracket access) are **two different objects**. \`gl.message.datetime\` is **AttributeError** at runtime — the NamedTuple has no \`datetime\` field. Use \`gl.message_raw['datetime']\` for time.
 
-### Time signal — \`gl.message.datetime\` only
+Never accept the sender as a parameter from the user — read it from \`gl.message.sender_address\`.
 
-py-genlayer does **not** expose \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, or any similar function. The transaction's time is \`gl.message.datetime\` and it's a **string** (ISO-8601). To do arithmetic, parse it with stdlib:
+### Time signal — \`gl.message_raw['datetime']\` only
+
+py-genlayer does **not** expose \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, or any similar function. The transaction's time lives on \`gl.message_raw['datetime']\` and it's a **string** (ISO-8601). To do arithmetic, parse it with stdlib:
 
 \`\`\`python
 from datetime import datetime, timedelta
 
 # In __init__:
-now = datetime.fromisoformat(gl.message.datetime)
+now = datetime.fromisoformat(gl.message_raw['datetime'])
 self.deadline = (now + timedelta(seconds=duration_seconds)).isoformat()  # stored as str
 # or, if you prefer numeric storage:
 self.deadline_epoch = u256(int((now + timedelta(seconds=duration_seconds)).timestamp()))
 
 # Later, to test whether time has passed:
-if datetime.fromisoformat(gl.message.datetime) >= datetime.fromisoformat(self.deadline):
+if datetime.fromisoformat(gl.message_raw['datetime']) >= datetime.fromisoformat(self.deadline):
     ...
 \`\`\`
 
-Storage type for deadlines is your call — \`str\` (the ISO form) is simplest, \`u256\` of a Unix epoch is more compact. **Never** call \`gl.vm.timestamp()\` — it does not exist and the contract will fail to instantiate at deploy with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`.`;
+Storage type for deadlines is your call — \`str\` (the ISO form) is simplest, \`u256\` of a Unix epoch is more compact. **Never** call \`gl.vm.timestamp()\` — it does not exist and the contract will fail to instantiate at deploy with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`. **Never** read \`gl.message.datetime\` — it raises \`AttributeError: 'MessageType' object has no attribute 'datetime'\`. The runtime path is \`gl.message_raw['datetime']\`.`;
 
 const ADDRESSES = `## Hard rule 6 — Address parameters
 
@@ -404,7 +412,7 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
 11. **Unallocated nested TreeMap** — use \`gl.storage.inmem_allocate(TreeMap[K, V])\` the first time you set a value at a parent key.
 12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.
 13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."
-14. **Hallucinated APIs.** If an identifier (function, attribute, classmethod, module path) does not appear in the **SDK reference** section below, it does not exist. Common cases: \`gl.vm.timestamp()\`, \`gl.block.*\`, \`gl.now()\` (use \`gl.message.datetime\` instead); \`Address.zero()\`, \`Address.null()\`, \`Address.empty()\` (use the all-zero literal \`Address("0x" + "00" * 20)\` or a \`bool\` sentinel flag). When in doubt, reach for something listed in the SDK reference and restructure if needed.`;
+14. **Hallucinated APIs.** If an identifier (function, attribute, classmethod, module path) does not appear in the **SDK reference** section below, it does not exist. Common cases: \`gl.vm.timestamp()\`, \`gl.block.*\`, \`gl.now()\`, \`gl.message.datetime\` (use \`gl.message_raw['datetime']\` instead — note bracket access; \`gl.message\` is a NamedTuple with only 5 fields); \`Address.zero()\`, \`Address.null()\`, \`Address.empty()\` (use the all-zero literal \`Address("0x" + "00" * 20)\` or a \`bool\` sentinel flag). When in doubt, reach for something listed in the SDK reference and restructure if needed.`;
 
 const SDK_REF = `${SDK_REFERENCE}`;
 

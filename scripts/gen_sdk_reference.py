@@ -255,17 +255,49 @@ def field_pairs(cls: ast.ClassDef) -> list[tuple[str, str, str]]:
 # ── Renderers ───────────────────────────────────────────────────────────
 
 
-def render_message_type(msg_module: ast.Module) -> str:
-    """Render gl.message namespace from MessageRawType TypedDict."""
+def render_message_type(gl_init_module: ast.Module, msg_module: ast.Module) -> str:
+    """Render gl.message (NamedTuple, attribute access) and gl.message_raw
+    (TypedDict, item access).
+
+    These are two different objects: `gl.message` is the convenience
+    NamedTuple bound at runtime in `gl/__init__.py` with only the
+    most-used fields; `gl.message_raw` is the full underlying TypedDict
+    from `_internal/msg.py` with every transaction-context field. The
+    SDK does NOT bridge raw fields onto `gl.message` — e.g.
+    `gl.message.datetime` is `AttributeError` at runtime."""
+    # MessageType NamedTuple — the attribute-access object.
+    msg_lines = ["### gl.message  (NamedTuple — attribute access)"]
+    msg_lines.append(
+        "`gl.message` is a NamedTuple with **only** these fields. "
+        "Anything else (datetime, is_init, stack, entry_kind, …) lives on "
+        "`gl.message_raw` and must be read with dict syntax — see below."
+    )
+    msg_lines.append("")
+    found_msg_type = False
+    for n in gl_init_module.body:
+        if isinstance(n, ast.ClassDef) and n.name == "MessageType":
+            found_msg_type = True
+            for name, anno, doc in field_pairs(n):
+                msg_lines.append(_bullet(name, anno, doc))
+            break
+    if not found_msg_type:
+        msg_lines.append("(parse failed — MessageType not found in gl/__init__.py)")
+
+    # MessageRawType TypedDict — the dict-access object (gl.message_raw).
+    raw_lines = ["", "### gl.message_raw  (TypedDict — dict access, `gl.message_raw['field']`)"]
+    raw_lines.append(
+        "Full transaction context as a TypedDict. **Use bracket notation, "
+        "not attribute access**: `gl.message_raw['datetime']`, not "
+        "`gl.message_raw.datetime`."
+    )
+    raw_lines.append("")
     for n in msg_module.body:
         if isinstance(n, ast.ClassDef) and n.name == "MessageRawType":
-            lines = ["### gl.message  (transaction context — readonly)"]
-            lines.append("Accessed as `gl.message.<field>` inside any contract method.")
-            lines.append("")
             for name, anno, doc in field_pairs(n):
-                lines.append(_bullet(name, anno, doc))
-            return "\n".join(lines)
-    return "### gl.message  (transaction context)\n(parse failed — see _internal/msg.py)"
+                raw_lines.append(_bullet(name, anno, doc))
+            break
+
+    return "\n".join(msg_lines + raw_lines)
 
 
 def render_vm(mod: ast.Module) -> str:
@@ -457,7 +489,7 @@ The following is the curated public surface for the pinned py-genlayer release. 
 `gl` is a proxy to `genlayer.gl`. `gl.message`, `gl.vm`, `gl.eq_principle`, `gl.nondet`, `gl.storage` are the namespaces you'll touch most often. `gl.Address`, `gl.TreeMap`, integer widths, etc. are the same objects as the top-level imports from `from genlayer import *`.
 
 ### Things that do NOT exist (common hallucinations)
-- `gl.vm.timestamp()`, `gl.block.timestamp`, `gl.now()` — there is no time API beyond `gl.message.datetime` (ISO-8601 string; parse with `datetime.fromisoformat`).
+- `gl.vm.timestamp()`, `gl.block.timestamp`, `gl.now()` — there is no time API. The only time signal is `gl.message_raw['datetime']` (ISO-8601 string; parse with `datetime.fromisoformat`). **`gl.message.datetime` does NOT exist** — `gl.message` is a NamedTuple with only `contract_address`, `sender_address`, `origin_address`, `value`, `chain_id`.
 - `Address.zero()`, `Address.null()`, `Address.empty()` — only `Address(val: str | bytes)`.
 - `@allow_storage` on `Enum` — Enums aren't storage-eligible; store the `.value` as `u256`.
 - `float` anywhere in storage or types — there is no float in the SDK type system.
@@ -471,6 +503,7 @@ def render_all() -> str:
     assert_pin_present(ver, pin)
 
     msg_mod = parse(sdk_root / "_internal" / "msg.py")
+    gl_init_mod = parse(sdk_root / "gl" / "__init__.py")
     vm_mod = parse(sdk_root / "gl" / "vm.py")
     eq_mod = parse(sdk_root / "gl" / "eq_principle.py")
     nondet_init = parse(sdk_root / "gl" / "nondet" / "__init__.py")
@@ -484,7 +517,7 @@ def render_all() -> str:
 
     sections = [
         preamble.rstrip(),
-        render_message_type(msg_mod),
+        render_message_type(gl_init_mod, msg_mod),
         render_vm(vm_mod),
         render_eq_principle(eq_mod),
         render_nondet(nondet_init, nondet_web),

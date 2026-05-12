@@ -52,6 +52,7 @@ async function assertFile(path, asserts) {
 // one, change the other).
 const REF_SOURCES = [
   "_internal/msg.py",
+  "gl/__init__.py",
   "gl/vm.py",
   "gl/eq_principle.py",
   "gl/nondet/__init__.py",
