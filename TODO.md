@@ -45,11 +45,12 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 5. Rate limit + circuit breaker + global caps
 
-- [ ] `src/lib/rate-limit.ts` — Upstash REST client; per-IP daily fixed window (`ratelimit:ip:<hash>:<YYYY-MM-DD>`, 24h TTL); global counters (`ratelimit:global:<YYYY-MM-DD>` for count and USD est)
-- [ ] `src/lib/circuit.ts` — Upstash-backed counter; 3× 5xx in 5 min → open for 1h
-- [ ] `src/lib/ip.ts` — first-hop `x-forwarded-for`, fallback `request.ip`
-- [ ] `src/lib/log.ts` — structured logger that *cannot* take prompt/response/key as args (type-level guard)
-- [ ] **Verify:** With `FREE_TIER_DAILY_LIMIT=2`, curl the route 3× — 3rd is 429. Confirm key TTL via Upstash console. Mock provider 5xx three times → next call returns 503 with breaker message.
+- [x] `src/lib/redis.ts` — shared Upstash REST client, `todayKey()` UTC-day suffix, `secondsUntilUtcMidnight()` TTL helper.
+- [x] `src/lib/rate-limit.ts` — `checkAndReserve(ipHash)` increments per-IP and global request counters with rollback-on-over; `recordUsageCost(usd)` tops up the USD ceiling post-call; `peekRemaining(ipHash)` for the indicator.
+- [x] `src/lib/circuit.ts` — sorted-set sliding window (5 min), 3 failures → opens for 1h via NX-locked `circuit:open_until`; `isOpen()` / `recordFailure()` / `resetBreaker()`.
+- [x] `src/lib/ip.ts` — first-hop `x-forwarded-for` (Vercel-correct), sha256 + `IP_HASH_SALT`. Raw IP never leaves the module.
+- [x] `src/lib/log.ts` — `LogEvent` is a closed union; a `Forbidden` mapped type makes `prompt` / `response` / `apiKey` / `key` / `messages` / `body` compile errors on `log()`. Verified by a temporary file that produced `TS2322: Type 'string' is not assignable to type 'never'`.
+- [x] **Verify:** `scripts/check-rate-limit.ts` against real Upstash — all 5 suites pass: per-IP cap (2 allowed, 3rd → 429 `per_ip`), global request cap (cap=1 blocks 2nd → 429 `global_requests`), USD ceiling (over-cap blocks → 429 `global_usd`, raising cap re-allows), circuit breaker (2 failures don't trip, 3rd does, NX prevents re-tripping, reset works), structured log emits clean JSON line. `pnpm typecheck` clean.
 
 ## 6. API routes
 
