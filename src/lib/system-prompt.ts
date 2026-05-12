@@ -163,13 +163,25 @@ if gl.message.sender_address.as_hex.lower() == external_string.lower():
 
 const ERRORS = `## Hard rule 7 — Errors
 
-Raise \`gl.vm.UserError\` for any user-visible guard. Do not use \`assert\` or bare \`Exception\`:
+Raise \`gl.vm.UserError\` for **every** user-visible guard. Do **not** \`raise\` any built-in Python exception (\`ValueError\`, \`TypeError\`, \`RuntimeError\`, \`Exception\`, \`AssertionError\`, etc.) anywhere inside the contract class — lint W004 ("Bare Python exception in contract") flags these. Do not use \`assert\`.
 
 \`\`\`python
+# Direct guards — always gl.vm.UserError, with a clear message.
 if room_id not in self.rooms:
     raise gl.vm.UserError("Room not found")
 if self.rooms[room_id].resolved:
     raise gl.vm.UserError("Room already resolved")
+
+# Converting a stdlib exception (e.g., bytes.fromhex raising ValueError):
+# catch it and re-raise as UserError. Do NOT raise your own ValueError
+# first inside the try block — that's still flagged by W004 even though
+# the except handler converts it.
+try:
+    sealed_bytes = bytes.fromhex(sealed_hash_hex)
+except ValueError:
+    raise gl.vm.UserError("Invalid sealed hash (not hex)")
+if len(sealed_bytes) != 32:
+    raise gl.vm.UserError("Invalid sealed hash (must be 32 bytes / 64 hex chars)")
 \`\`\``;
 
 const NONDET = `## Hard rule 8 — Non-determinism (LLMs, web fetches)
@@ -221,7 +233,30 @@ LLM-driven equivalence check via the \`EqComparative\` template. Use when valida
 
 ### The umbrella rule for the \`gl.nondet.*\` namespace
 
-**Every** call into the \`gl.nondet.*\` namespace — including the ones that look deterministic, like \`gl.nondet.hash.keccak256\`, \`gl.nondet.web.get\`, and \`gl.nondet.web.render\` — must be reachable from one of the wrappers above (\`run_nondet_unsafe\`, \`prompt_non_comparative\`, \`prompt_comparative\`, or \`strict_eq\`). The namespace name is the consensus contract: anything inside it is treated as needing equivalence-principle resolution, regardless of whether the function happens to produce the same bytes every time. The genvm-lint pass surfaces a stray call as W/E010 ("\`gl.nondet.*\` call not reachable from equivalence principle block"). If you need a deterministic hash inline, wrap it in \`gl.eq_principle.strict_eq(lambda: gl.nondet.hash.keccak256(...))\`.`;
+**Every** call into the \`gl.nondet.*\` namespace — including the ones that look deterministic, like \`gl.nondet.hash.keccak256\`, \`gl.nondet.web.get\`, and \`gl.nondet.web.render\` — must be reachable from one of the wrappers above (\`run_nondet_unsafe\`, \`prompt_non_comparative\`, \`prompt_comparative\`, or \`strict_eq\`). The namespace name is the consensus contract: anything inside it is treated as needing equivalence-principle resolution, regardless of whether the function happens to produce the same bytes every time. The genvm-lint pass surfaces a stray call as W/E010 ("\`gl.nondet.*\` call not reachable from equivalence principle block"). If you need a deterministic hash inline, wrap it via a named local function (see "Always pass a named local function" below).
+
+### Always pass a named local function — never a \`lambda\` — to nondet wrappers
+
+\`gl.eq_principle.strict_eq\`, \`gl.eq_principle.prompt_comparative\`, \`gl.eq_principle.prompt_non_comparative\`, \`gl.vm.run_nondet\`, and \`gl.vm.run_nondet_unsafe\` all accept a callable. **Define a named local \`def\` and pass it by name**, even for a one-liner. Never pass an inline \`lambda\`.
+
+\`\`\`python
+# WRONG — lambda taints the entire enclosing method as "inside nondet".
+# Storage writes and any later eq_principle / nondet call in the same
+# method will trip lint E025 / E026 (false positives, but they block).
+calc = gl.eq_principle.strict_eq(
+    lambda: gl.nondet.hash.keccak256(payload)
+).get()
+self.processed[sender] = True   # ← lint flags this as "storage write in nondet"
+
+# RIGHT — named def keeps the safe scope tight to the function body.
+def compute_hash() -> bytes:
+    return gl.nondet.hash.keccak256(payload)
+
+calc = gl.eq_principle.strict_eq(compute_hash).get()
+self.processed[sender] = True   # ← fine; the safe scope ends with compute_hash
+\`\`\`
+
+Why: the lint's call-graph analysis tracks named callables precisely (only \`compute_hash\` is marked "inside nondet"), but a \`lambda\` argument is conservatively treated as marking the entire enclosing method as nondet. Named \`def\`s are also strictly better for debugging and pair naturally with rule #9's "copy storage to locals before nondet" pattern.`;
 
 const NONDET_RULES = `## Hard rule 9 — Storage and nondet do not mix
 
@@ -403,13 +438,15 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
    \`\`\`
 3. **String-hex comparison of an \`Address\` without lowercasing.** \`Address.__eq__\` already compares raw bytes, so \`addr_a == addr_b\` between two \`Address\` objects is correct without any normalization. The bug is when you compare an \`Address\` against a hex *string* — e.g. a value pulled from JSON, a constructor arg you haven't yet wrapped, or a string from \`gl.nondet.web.get\`. Either coerce both sides to \`Address\` first, or compare lowercase hex on both sides: \`a.as_hex.lower() == b.lower()\`.
 4. **Storage access inside nondet** (\`self.<field>\` referenced in a function passed to \`run_nondet_unsafe\` / \`prompt_non_comparative\` / etc.). Always copy to a local first.
+4b. **Lambda passed to a nondet wrapper** — \`gl.eq_principle.strict_eq(lambda: …)\` (and the same with \`prompt_comparative\`, \`prompt_non_comparative\`, \`run_nondet*\`). The lint conservatively marks the entire enclosing method as "inside nondet," so any storage write or second eq_principle call later in the same method trips E025 / E026. Always extract a named local \`def\` and pass it by name.
 5. **JSON parsed without fence-stripping** — LLM output may be wrapped in \`\`\`\`json … \`\`\`\`.
-6. **\`assert\` / bare \`raise Exception\`** for guards — use \`raise gl.vm.UserError(...)\`.
+6. **\`assert\` / \`raise SomeBuiltin(...)\`** — no built-in Python exception (\`ValueError\`, \`TypeError\`, \`RuntimeError\`, \`Exception\`, …) should be raised inside the contract class. Lint W004 flags every such call. The only thing you may raise is \`gl.vm.UserError(message)\`. If a stdlib call (\`bytes.fromhex\`, \`int(...)\`, \`json.loads\`, etc.) might itself raise, wrap in \`try/except\` and re-raise as \`gl.vm.UserError\` — but do not synthesize your own \`raise ValueError\` first inside the \`try\`.
 7. **State change and LLM call in the same write** — split into two methods.
 8. **\`Address\` typed parameter** instead of \`str\` (the SDK expects \`str\` at the boundary, then \`Address(...)\` inside).
 9. **Reading sender from a parameter** instead of \`gl.message.sender_address\`.
 10. **Wrong eq_principle choice** — raw LLM output under \`strict_eq\` will not reach consensus. Use \`prompt_non_comparative\` or \`run_nondet_unsafe\`.
 11. **Unallocated nested TreeMap** — use \`gl.storage.inmem_allocate(TreeMap[K, V])\` the first time you set a value at a parent key.
+11b. **Union / Optional in a storage field** — \`Address | None\`, \`Optional[T]\`, \`u256 | None\`, \`Union[A, B]\` all fail at deploy with \`E104: incorrect number of generic arguments for <class 'types.UnionType'>\`. To represent "no winner yet" or any other unset state, use a sentinel value (\`Address("0x" + "00" * 20)\`, \`u256(0)\`, empty \`str\`) or pair the field with a sibling \`bool\` flag (e.g., \`winner: Address\` + \`has_winner: bool = False\`). This applies anywhere storage descriptors are derived — contract fields, \`@allow_storage\` dataclass fields, and the type parameters of \`TreeMap\` / \`DynArray\`.
 12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.
 13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."
 14. **Hallucinated APIs.** If an identifier (function, attribute, classmethod, module path) does not appear in the **SDK reference** section below, it does not exist. Common cases: \`gl.vm.timestamp()\`, \`gl.block.*\`, \`gl.now()\`, \`gl.message.datetime\` (use \`gl.message_raw['datetime']\` instead — note bracket access; \`gl.message\` is a NamedTuple with only 5 fields); \`Address.zero()\`, \`Address.null()\`, \`Address.empty()\` (use the all-zero literal \`Address("0x" + "00" * 20)\` or a \`bool\` sentinel flag). When in doubt, reach for something listed in the SDK reference and restructure if needed.`;

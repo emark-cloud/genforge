@@ -407,6 +407,7 @@ def render_storage(storage_init: ast.Module, tree_map: ast.Module, vec: ast.Modu
     lines.append("- `TreeMap[K, V]`, `DynArray[T]`, `Array[T, N]`")
     lines.append("- `@allow_storage`-decorated dataclasses or plain classes")
     lines.append("- **`Enum` subclasses are NOT eligible.** Store the underlying integer (`u256(MyEnum.X.value)`) and round-trip via the Enum class inside methods.")
+    lines.append("- **Union types are NOT eligible.** `Address | None`, `Optional[T]`, `Union[A, B]` all fail at deploy (`E104: incorrect number of generic arguments for <class 'types.UnionType'>`). To express \"unset,\" use a sentinel (`Address(\"0x\" + \"00\" * 20)`, `u256(0)`, empty `str`/`bytes`) or a parallel `has_winner: bool` field — never a `Optional` annotation.")
     lines.append("")
     # storage __init__ exports as module-level functions.
     for n in storage_init.body:
@@ -493,6 +494,7 @@ The following is the curated public surface for the pinned py-genlayer release. 
 - `Address.zero()`, `Address.null()`, `Address.empty()` — only `Address(val: str | bytes)`.
 - `@allow_storage` on `Enum` — Enums aren't storage-eligible; store the `.value` as `u256`.
 - `float` anywhere in storage or types — there is no float in the SDK type system.
+- **Union types in storage**: `Address | None`, `Optional[T]`, `Union[A, B]`, `T | U` are NOT storage-eligible (SDK raises `E104: incorrect number of generic arguments for <class 'types.UnionType'>` at deploy). Encode optionality as a sentinel value (e.g., `Address("0x" + "00" * 20)`, `u256(0)`, empty `str`) or a parallel `bool` flag.
 
 """
 
