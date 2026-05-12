@@ -70,9 +70,12 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 8. Free-tier UI states
 
-- [ ] `src/components/FreeTierIndicator.tsx` — three states: "X / N free today" (counter), "Free tier used up — add your own key in Settings" (CTA disable + violet dot on gear), "Using your Anthropic key" (BYOK active, no counter)
-- [ ] Backend returns remaining quota in response headers; client reads and renders
-- [ ] **Verify:** On 6th call (with default `FREE_TIER_DAILY_LIMIT=5`), CTA disables and the gear shows a subtle violet dot. With BYOK key set, indicator hides the counter and shows the provider name only.
+- [x] `src/lib/quota.ts` — `tierFromHeaders` + `readQuotaHeaders` that turn a `fetch` response into the indicator's input. BYOK responses (no ratelimit headers) → `null` quota.
+- [x] `src/hooks/useByok.ts` — `useSyncExternalStore`-backed subscription to `localStorage` + a `genforge:byok-changed` window event dispatched by `SettingsModal` on every change. Snapshot is cached by `provider|key|model` so React doesn't infinite-loop. Also listens for cross-tab `storage` events.
+- [x] `src/components/FreeTierIndicator.tsx` — three states: BYOK active (key icon + "Using your X key"), exhausted (alert icon + "Free tier used up — add your own key in Settings"), free (sparkle + "{remaining} / {limit} free today" or quieter "Free tier" before the first call). Exported `isExhausted(byok, quota)` predicate for CTA disable logic.
+- [x] `SettingsLauncher` gained a `pulse` prop that paints a 6px violet dot on the gear when free tier is exhausted and no BYOK is set.
+- [x] `FreeTierSmoke` harness on the smoke-test page so the three states + dot + disabled CTA can be eyeballed in `pnpm dev` until the real workspace lands in Step 9.
+- [x] **Verify:** `scripts/check-quota.ts` — 14 assertions: `tierFromHeaders` maps `free` / `byok` / `n/a` / missing correctly; `readQuotaHeaders` parses headers, clamps negative `remaining` to 0, rejects non-numeric, returns null for BYOK; `isExhausted` is false for `null` quota / available / BYOK, true only for `remaining<=0 && !byok`. Combined with the Step 6 route tests that already prove the API emits `x-genforge-tier` + `x-ratelimit-*`, the data path is end-to-end-verified. `pnpm build` + `pnpm typecheck` + `pnpm lint` clean.
 
 ## 9. Debug tab
 

@@ -15,6 +15,7 @@ import {
   setKey,
   setModel,
 } from "@/lib/keys";
+import { emitByokChanged } from "@/hooks/useByok";
 
 type Props = {
   onClose: () => void;
@@ -58,6 +59,7 @@ export function SettingsModal({ onClose, onChange }: Props) {
   const openerRef = useRef<HTMLElement | null>(null);
 
   const notifyChange = useCallback(() => {
+    emitByokChanged();
     onChange?.();
   }, [onChange]);
 

@@ -5,7 +5,7 @@
  *
  * Replace this once the workspace shell exists.
  */
-import { SettingsLauncher } from "@/components/SettingsLauncher";
+import { FreeTierSmoke } from "@/components/FreeTierSmoke";
 
 export default function Home() {
   return (
@@ -52,8 +52,10 @@ export default function Home() {
         >
           Ghost
         </button>
-        <SettingsLauncher />
       </div>
+
+      {/* Step 8 smoke-test harness: free-tier indicator + gear + CTA. */}
+      <FreeTierSmoke />
 
       {/* Input */}
       <input
