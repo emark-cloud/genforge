@@ -56,7 +56,7 @@ export function Workspace() {
         byok={byok}
         quota={quota}
       />
-      <main className="min-h-0 flex-1 overflow-hidden">
+      <main className="reveal-workspace min-h-0 flex-1 overflow-hidden">
         {activeTab === "debug" ? (
           <DebugTab byok={byok} quota={quota} onQuotaUpdate={onQuotaUpdate} />
         ) : (

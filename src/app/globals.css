@@ -206,6 +206,33 @@
   }
 }
 
+/* Page-load reveal cascade — topbar slides down 8px, workspace fades in.
+   One-shot on mount; total stays under 300ms per DESIGN motion budget. */
+@keyframes topbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes workspace-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.reveal-topbar {
+  animation: topbar-in var(--duration-base) var(--ease-out) 60ms both;
+}
+.reveal-workspace {
+  animation: workspace-in var(--duration-base) var(--ease-out) 120ms both;
+}
+
 /* Respect motion preferences — strip transitions to instant. */
 @media (prefers-reduced-motion: reduce) {
   *,

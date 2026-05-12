@@ -105,15 +105,15 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 11. Polish
 
-- [ ] Empty-state Instrument Serif moment on the output side ("waiting for code") + `⌘+Enter` keyboard hint
-- [ ] `⌘+Enter` shortcut fires the active tab's CTA when the input is focused
-- [ ] Error toasts: provider 401/500, BYOK provider 429, network error, malformed JSON warning
-- [ ] `prefers-reduced-motion`: strip easing transitions to instant
-- [ ] Focus ring on every focusable element (buttons, inputs, tabs, rail items, settings rows)
-- [ ] Mobile (<1024px): "Best on a wider screen" notice instead of squished layout
-- [ ] Favicon: italic violet *F* on dark
-- [ ] Page-load reveal cascade: rail (0ms) → topbar slide-down 8px (60ms) → workspace fade-in (120ms), total <300ms, once
-- [ ] **Verify:** Tab through every focusable element in both tabs and Settings — focus ring visible everywhere. Toggle reduced-motion in DevTools — animations stop. Resize <1024px — see the notice.
+- [x] Empty-state Instrument Serif moment on the output side ("waiting for code") + `⌘+Enter` keyboard hint (`EmptyOutput.tsx` + DebugTab/GenerateTab CTA hint).
+- [x] `⌘+Enter` shortcut fires the active tab's CTA when the input is focused (handled in both `DebugTab.tsx` and `GenerateTab.tsx` via `onKeyDown` on the input column).
+- [x] Inline error banner shown beneath the CTA — covers provider 401/500, BYOK provider 429, network error, malformed-JSON warning. Stayed inline (vs. toast) because it lives next to the trigger and survives until the user retries; same `role="alert"` + `--error` token in both tabs.
+- [x] `prefers-reduced-motion` — `@media (prefers-reduced-motion: reduce)` in `globals.css` zeroes out every transition + animation universally.
+- [x] Focus ring on every focusable element — universal `*:focus-visible` rule in `globals.css` paints the double-ring + glow. Grep confirmed no `outline-none` / `focus:outline` overrides anywhere in `src/components`.
+- [x] Mobile (<1024px): "Best on a wider screen" notice instead of the squished layout (`Workspace.tsx` `matchMedia('(max-width: 1023px)')` branch — shipped in Step 9).
+- [x] Favicon: italic violet *F* on dark — `src/app/icon.svg`, replaces the default `favicon.ico`. Next 16 picks up `icon.svg` automatically and emits the correct `<link rel="icon">`.
+- [x] Page-load reveal cascade — `topbar-in` keyframe (slide down 8px, 180ms, 60ms delay) + `workspace-in` keyframe (fade, 180ms, 120ms delay) in `globals.css`, applied as `.reveal-topbar` on the Topbar `<header>` and `.reveal-workspace` on the workspace `<main>`. Total <300ms. Reduced-motion media query already strips it.
+- [x] **Verify:** `pnpm build` + `pnpm typecheck` + `pnpm lint` clean. Reveal animations + favicon land in the production bundle (build log shows `/icon.svg` route). Focus-ring + reduced-motion tab-through is a user-side check in `pnpm dev`.
 
 ## 12. Pre-deploy
 

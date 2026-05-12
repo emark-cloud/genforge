@@ -24,7 +24,7 @@ export function Topbar({ activeTab, onTabChange, byok, quota }: Props) {
 
   return (
     <header
-      className="h-[56px] shrink-0 border-b border-subtle bg-panel"
+      className="reveal-topbar h-[56px] shrink-0 border-b border-subtle bg-panel"
       role="banner"
     >
       <div className="grid h-full grid-cols-[1fr_auto_1fr] items-center px-[var(--space-5)]">
