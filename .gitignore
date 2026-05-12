@@ -44,3 +44,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# frontend audit artifacts (script runs locally; screenshots + report are
+# byproducts, not source)
+/audit/

@@ -32,12 +32,12 @@ function LandingHeader() {
             <span>enForge</span>
           </span>
         </Link>
-        <nav className="flex items-center gap-[var(--space-5)]">
+        <nav className="flex items-center gap-[var(--space-3)] sm:gap-[var(--space-5)]">
           <a
             href="https://github.com/emark-cloud/genforge"
             target="_blank"
             rel="noreferrer"
-            className="hidden text-sm text-secondary transition-colors duration-[var(--duration-fast)] hover:text-primary sm:inline"
+            className="hidden text-sm text-secondary transition-colors duration-[var(--duration-fast)] hover:text-primary sm:inline-block sm:pr-[var(--space-2)]"
           >
             GitHub
           </a>
@@ -62,7 +62,7 @@ function Hero() {
       <h1 className="font-display italic leading-[1.02] tracking-tight text-primary text-[clamp(2.75rem,7vw,5.5rem)]">
         Fix what&apos;s broken.
         <br />
-        <span className="text-secondary">Forge what&apos;s new.</span>
+        Forge what&apos;s new.
       </h1>
 
       <p className="max-w-[58ch] text-md text-secondary leading-[1.6]">
@@ -91,7 +91,7 @@ function Hero() {
         </a>
       </div>
 
-      <p className="text-sm text-tertiary">
+      <p className="text-sm text-secondary">
         Free to try — 5 calls / day from your IP. Paste your own Anthropic,
         OpenAI, or Gemini key for unlimited.
       </p>
