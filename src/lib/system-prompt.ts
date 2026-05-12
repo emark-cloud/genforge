@@ -370,7 +370,28 @@ class Reviewer(gl.Contract):
 const COMMON_BUGS = `## Common bugs you must check for and fix
 
 1. **\`float\` anywhere** — replace with \`u256\` (or \`bigint\` for unbounded). Reject prompts that imply float math; scale by a denominator instead.
-2. **Missing \`@allow_storage\`** on a class that's used in storage. This applies to **every** class declared in the file that appears as a contract field type or inside a generic storage container (\`TreeMap[K, V]\`, \`DynArray[T]\`, etc.) — dataclasses, plain classes, AND \`Enum\` subclasses. If you write \`class State(Enum): ...\` and then \`state: State\` on the contract, decorate the enum: \`@allow_storage\\nclass State(Enum): ...\`. The genvm-lint pass surfaces this as E104 / E014.
+2. **Missing \`@allow_storage\`** on a class that's used in storage. Apply \`@allow_storage\` to **dataclasses and plain classes** that appear as a contract field type or inside a generic storage container (\`TreeMap[K, V]\`, \`DynArray[T]\`, etc.). The genvm-lint pass surfaces this as E104 / E014.
+
+   **Enum subclasses are different — never put an \`Enum\` in storage.** The SDK only recognizes Address, str, bytes, bool, the integer widths (u8…u256, i8…i256), \`bigint\`, plus \`@allow_storage\`-decorated dataclasses. \`Enum\` is not in that set, and \`@allow_storage\` on an \`Enum\` only flips a flag without registering a type descriptor — instantiation later fails with \`AssertionError: Is right the same storage type? \\\`MyEnum\\\` <- \\\`MyEnum\\\`\`. The linter's W014 ("Add @allow_storage decorator to the class") is misleading for Enums; ignore it for them. Instead, store the underlying integer and round-trip through the Enum class only inside methods:
+
+   \`\`\`python
+   class Phase(Enum):     # not in storage; just a name -> int helper
+       BIDDING = 0
+       REVEALING = 1
+       CLOSED = 2
+
+   class Auction(gl.Contract):
+       phase: u256        # store the value, not the Enum
+
+       def __init__(self):
+           self.phase = u256(Phase.BIDDING.value)
+
+       @gl.public.write
+       def open_reveal(self) -> None:
+           if self.phase != u256(Phase.BIDDING.value):
+               raise gl.vm.UserError("Wrong phase")
+           self.phase = u256(Phase.REVEALING.value)
+   \`\`\`
 3. **String-hex comparison of an \`Address\` without lowercasing.** \`Address.__eq__\` already compares raw bytes, so \`addr_a == addr_b\` between two \`Address\` objects is correct without any normalization. The bug is when you compare an \`Address\` against a hex *string* — e.g. a value pulled from JSON, a constructor arg you haven't yet wrapped, or a string from \`gl.nondet.web.get\`. Either coerce both sides to \`Address\` first, or compare lowercase hex on both sides: \`a.as_hex.lower() == b.lower()\`.
 4. **Storage access inside nondet** (\`self.<field>\` referenced in a function passed to \`run_nondet_unsafe\` / \`prompt_non_comparative\` / etc.). Always copy to a local first.
 5. **JSON parsed without fence-stripping** — LLM output may be wrapped in \`\`\`\`json … \`\`\`\`.
@@ -382,7 +403,8 @@ const COMMON_BUGS = `## Common bugs you must check for and fix
 11. **Unallocated nested TreeMap** — use \`gl.storage.inmem_allocate(TreeMap[K, V])\` the first time you set a value at a parent key.
 12. **Missing or wrong header** — the two-line header is mandatory; the hash must be the pinned one above.
 13. **Ownership-arg footgun** — if the spec implies an owner but does NOT explicitly say "owner is passed at deploy" or "owner is delegated to a different account," default \`owner\` to \`gl.message.sender_address\` inside \`__init__\` and take no constructor parameter for it. Reason: deployers routinely leave address fields blank in deploy UIs, which makes \`Address("")\` raise \`invalid address\` at instantiation. Only take an explicit \`owner: str\` arg when the prompt specifically requires ownership separate from the deployer. The same logic applies to any other "Address" constructor arg that is really just "the deployer."
-14. **Hallucinated time API** — \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, etc. do not exist. The deploy will fail at instantiation with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`. Read \`gl.message.datetime\` (ISO-8601 \`str\`) and parse with \`datetime.fromisoformat\` for any temporal logic — see rule 5.`;
+14. **Hallucinated time API** — \`gl.vm.timestamp()\`, \`gl.block.timestamp\`, \`gl.now()\`, etc. do not exist. The deploy will fail at instantiation with \`AttributeError: module 'genlayer.gl.vm' has no attribute 'timestamp'\`. Read \`gl.message.datetime\` (ISO-8601 \`str\`) and parse with \`datetime.fromisoformat\` for any temporal logic — see rule 5.
+15. **Hallucinated \`Address\` helpers** — \`Address.zero()\`, \`Address.null()\`, \`Address.empty()\` do **not** exist on the SDK's \`Address\` class. The only constructor is \`Address(val: str | bytes)\`. When you need a sentinel "no address yet," use the all-zero literal \`Address("0x" + "00" * 20)\` (or just \`Address("0x0000000000000000000000000000000000000000")\`), or — usually cleaner — sidestep the sentinel by tracking the state with a separate \`bool\` flag (e.g., \`winner_set: bool\`).`;
 
 const AUTHORITATIVE_SOURCES = `## Authoritative sources
 
