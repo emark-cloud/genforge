@@ -60,7 +60,7 @@ export function Workspace() {
         {activeTab === "debug" ? (
           <DebugTab byok={byok} quota={quota} onQuotaUpdate={onQuotaUpdate} />
         ) : (
-          <GenerateTab />
+          <GenerateTab byok={byok} quota={quota} onQuotaUpdate={onQuotaUpdate} />
         )}
       </main>
     </div>

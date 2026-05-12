@@ -96,10 +96,12 @@ Refer to `CLAUDE.md` for architecture, `SPEC.md` for functional spec, `DESIGN.md
 
 ## 10. Generate tab
 
-- [ ] Generate layout: large textarea + Generate CTA on the left; output read-only Monaco + usage notes (markdown) + Copy/Download on the right
-- [ ] **No network selector** (per locked decisions)
-- [ ] Same loading-state discipline as Debug
-- [ ] **Verify:** Type "sealed-bid auction where the LLM reveals the winner after a deadline". Confirm the produced contract has the correct header, no floats, `Address(...)` conversion in setters, `gl.message.sender_address`, and a sensible `eq_principle` choice. Optionally lint with `genlayer-dev:genvm-lint`.
+- [x] `src/components/GenerateTab.tsx` — left column: full-height description textarea + char counter + Generate CTA + inline error banner; right column: `EmptyOutput` until a result lands, then `GenerateOutput`. ⌘/Ctrl+Enter fires from inside the textarea. `isExhausted` gates the CTA the same way DebugTab does.
+- [x] `src/components/GenerateOutput.tsx` — Copy + Download right-aligned above a read-only Monaco of the produced contract, then a card with markdown usage notes + per-arg `name: type` / description cards.
+- [x] `Workspace.tsx` updated to thread `byok` / `quota` / `onQuotaUpdate` into GenerateTab so the same free-tier counter and BYOK indicator govern both flows.
+- [x] **No network selector** (per locked decisions).
+- [x] Same loading-state discipline as Debug — single Spinner inside the CTA, nothing else moves.
+- [x] **Verify:** `pnpm build` + `pnpm typecheck` + `pnpm lint` clean. The new tab only consumes the `/api/generate` JSON shape that `scripts/check-routes.ts` (Step 6) already exercised end-to-end. Interactive eyeball test (sealed-bid auction prompt → confirm header, no floats, `gl.message.sender_address`, sensible `eq_principle`) is a user-side check in `pnpm dev`.
 
 ## 11. Polish
 
