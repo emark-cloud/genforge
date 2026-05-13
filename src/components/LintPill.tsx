@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, AlertTriangle, OctagonAlert } from "lucide-react";
 import type { LintSummary } from "@/lib/lint";
 
@@ -22,6 +22,24 @@ export function LintPill({ lint }: Props) {
   // without an extra click. After that, the toggle is user-controlled.
   const initialOpen = (lint?.errorCount ?? 0) > 0 && (lint?.issues.length ?? 0) > 0;
   const [open, setOpen] = useState(initialOpen);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   if (!lint) return null;
 
   const state: "ok" | "warn" | "error" =
@@ -43,7 +61,7 @@ export function LintPill({ lint }: Props) {
   const expandable = lint.issues.length > 0;
 
   return (
-    <div className="relative inline-block">
+    <div ref={wrapRef} className="relative inline-block">
       <button
         type="button"
         onClick={() => expandable && setOpen((v) => !v)}
