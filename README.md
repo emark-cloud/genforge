@@ -48,10 +48,7 @@ src/
   styles/globals.css   ← design tokens (colors, type, spacing)
 lint-service/          ← Python FastAPI sidecar wrapping genvm-lint.
                          Deployed separately (Railway). See its README.
-SPEC.md                ← functional spec
-DESIGN.md              ← visual + interaction language
-GUIDELINES.md          ← GenLayer contract patterns the prompt teaches
-CLAUDE.md / TODO.md    ← project guide + build sequence
+CLAUDE.md              ← project guide loaded into every Claude session
 ```
 
 ## Scripts

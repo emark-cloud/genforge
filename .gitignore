@@ -51,3 +51,10 @@ next-env.d.ts
 
 # python bytecode (the lint-service uses py3; never commit caches)
 __pycache__/
+
+# Internal-only design / spec / build docs — kept on disk for local reference
+# (CLAUDE.md still points at them) but not published to GitHub.
+/SPEC.md
+/TODO.md
+/DESIGN.md
+/GUIDELINES.md
