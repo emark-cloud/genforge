@@ -57,7 +57,8 @@ src/
   styles/globals.css  ← color/spacing/type tokens (DESIGN.md → CSS vars)
 
 lint-service/         ← Python FastAPI microservice wrapping `genvm-lint check`.
-                       Deployed separately (Fly.io). See lint-service/README.md.
+                       Deployed separately (Railway; alt fly.toml shipped).
+                       See lint-service/README.md.
 ```
 
 ### Request routing (every `/api/debug` and `/api/generate` call)
@@ -132,7 +133,7 @@ See `.env.example`. Summary:
 | `LINT_SERVICE_URL` | Base URL of the genvm-lint microservice. Optional — runLLM is fail-open if unset. |
 | `LINT_SERVICE_SECRET` | Shared bearer secret for the lint service (sent as `X-Lint-Secret`). Must match `fly secrets`. |
 | `LINT_TIMEOUT_MS` | Client-side per-request timeout against the lint service. Default `13000` — set ≥ the service's `LINT_TIMEOUT_S` (default `12s`) plus ~1s network slack, so the client waits long enough for a real result or a clean 504 from the server. |
-| `LINT_CONCURRENCY` | Server-side (`fly secrets`) cap on simultaneous in-flight `genvm-lint check` subprocesses. Default `2` (sized for `shared-cpu-1x`). Pair with `fly.toml` `http_service.concurrency.soft_limit` so Fly autoscales when one box is full. |
+| `LINT_CONCURRENCY` | Server-side cap on simultaneous in-flight `genvm-lint check` subprocesses. Default `2` (sized for Fly's `shared-cpu-1x`); we run `4` on Railway. Set roughly equal to the container's vCPU count. On Fly, also raise `fly.toml` `http_service.concurrency.soft_limit` to match so machine-level autoscaling kicks in. |
 | `LINT_QUEUE_WAIT_S` | Server-side max time a request waits for a concurrency slot before failing fast as `503`. Default `4`. Tune up if you raise `LINT_CONCURRENCY`; the queue can never benefit from a wait longer than the subprocess itself. |
 
 ## Out of scope for v1 (do not add without discussion)
