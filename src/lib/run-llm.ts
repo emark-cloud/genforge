@@ -16,7 +16,7 @@
  *   6. shape the response (JSON body + quota headers).
  */
 
-import type { Flow } from "./system-prompt";
+import type { DebugAttempt, Flow } from "./system-prompt";
 import {
   buildSystemPrompt,
   buildDebugUserPrompt,
@@ -59,6 +59,7 @@ const MAX_CONTRACT_BYTES = 64 * 1024;
 const MAX_DESCRIPTION_BYTES = 8 * 1024;
 const MAX_ERROR_CONTEXT_BYTES = 8 * 1024;
 const MAX_BYOK_KEY_BYTES = 512;
+const MAX_ATTEMPT_EXPLANATION_BYTES = 4 * 1024;
 
 type Byok = {
   provider: ProviderName;
@@ -69,6 +70,10 @@ type Byok = {
 export type DebugBody = {
   contract: string;
   errorContext?: string | null;
+  /** Refix chain. Each entry is one prior iteration of (error → fix). The
+   * most recent entry's `fixed_code` is the candidate that failed in Studio
+   * and is what the model is asked to revise. */
+  priorAttempts?: DebugAttempt[] | null;
   byok?: Byok | null;
 };
 
@@ -120,6 +125,45 @@ function validateByok(b: unknown): { ok: true; byok: Byok | null } | { ok: false
   };
 }
 
+function validatePriorAttempts(raw: unknown):
+  | { ok: true; priorAttempts: DebugAttempt[] }
+  | { ok: false; status: 400 | 413; reason: string } {
+  if (raw == null) return { ok: true, priorAttempts: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, status: 400, reason: "priorAttempts must be an array" };
+  }
+  // No hard length cap — the prompt-side trim ladder (system-prompt.ts)
+  // degrades older entries gracefully. Per-entry byte caps below still apply.
+  const out: DebugAttempt[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const v = raw[i];
+    if (v == null || typeof v !== "object") {
+      return { ok: false, status: 400, reason: `priorAttempts[${i}] must be an object` };
+    }
+    const o = v as Record<string, unknown>;
+    if (!isString(o.fixed_code) || o.fixed_code.length === 0) {
+      return { ok: false, status: 400, reason: `priorAttempts[${i}].fixed_code required` };
+    }
+    if (byteLen(o.fixed_code) > MAX_CONTRACT_BYTES) {
+      return { ok: false, status: 413, reason: `priorAttempts[${i}].fixed_code too large` };
+    }
+    if (!isString(o.explanation)) {
+      return { ok: false, status: 400, reason: `priorAttempts[${i}].explanation must be a string` };
+    }
+    if (byteLen(o.explanation) > MAX_ATTEMPT_EXPLANATION_BYTES) {
+      return { ok: false, status: 413, reason: `priorAttempts[${i}].explanation too large` };
+    }
+    if (!isString(o.error)) {
+      return { ok: false, status: 400, reason: `priorAttempts[${i}].error must be a string` };
+    }
+    if (byteLen(o.error) > MAX_ERROR_CONTEXT_BYTES) {
+      return { ok: false, status: 413, reason: `priorAttempts[${i}].error too large` };
+    }
+    out.push({ fixed_code: o.fixed_code, explanation: o.explanation, error: o.error });
+  }
+  return { ok: true, priorAttempts: out };
+}
+
 function validateDebugBody(raw: unknown):
   | { ok: true; body: DebugBody }
   | { ok: false; status: 400 | 413; reason: string } {
@@ -143,9 +187,19 @@ function validateDebugBody(raw: unknown):
     }
     errorContext = o.errorContext;
   }
+  const prior = validatePriorAttempts(o.priorAttempts);
+  if (!prior.ok) return prior;
   const byok = validateByok(o.byok);
   if (!byok.ok) return byok;
-  return { ok: true, body: { contract: o.contract, errorContext, byok: byok.byok } };
+  return {
+    ok: true,
+    body: {
+      contract: o.contract,
+      errorContext,
+      priorAttempts: prior.priorAttempts.length > 0 ? prior.priorAttempts : null,
+      byok: byok.byok,
+    },
+  };
 }
 
 function validateGenerateBody(raw: unknown):
@@ -326,25 +380,39 @@ export async function runLLM(args: Args): Promise<RunResult> {
   const body = validated.body;
   const systemPrompt = buildSystemPrompt(flow);
 
-  // Pre-flight lint on the user-pasted contract (debug only). Findings are
-  // folded into the LLM's error context so the model has the same signal a
-  // careful reviewer would. lintContract returns null on any failure mode
-  // (no URL, timeout, etc.) — pre-lint is purely additive.
-  const preLint =
-    args.flow === "debug"
-      ? await lintContract((body as DebugBody).contract, { stage: "pre" })
-      : null;
+  // Pre-flight lint on the user-pasted contract (debug only). When this is a
+  // refix iteration, lint the *latest candidate that failed in Studio*, not
+  // the original paste — that's the code the model is being asked to revise.
+  // Findings are folded into the LLM's error context so the model has the
+  // same signal a careful reviewer would. lintContract returns null on any
+  // failure mode (no URL, timeout, etc.) — pre-lint is purely additive.
+  const debugBody = args.flow === "debug" ? (body as DebugBody) : null;
+  const priorAttempts = debugBody?.priorAttempts ?? null;
+  const preLintTarget =
+    debugBody == null
+      ? null
+      : priorAttempts && priorAttempts.length > 0
+        ? priorAttempts[priorAttempts.length - 1].fixed_code
+        : debugBody.contract;
+  const preLint = preLintTarget
+    ? await lintContract(preLintTarget, { stage: "pre" })
+    : null;
 
-  const userPrompt =
-    args.flow === "debug"
-      ? buildDebugUserPrompt({
-          contract: (body as DebugBody).contract,
-          errorContext: combineErrorContext(
-            (body as DebugBody).errorContext,
-            preLint,
-          ),
-        })
-      : buildGenerateUserPrompt({ description: (body as GenerateBody).description });
+  let promptTrim: ReturnType<typeof buildDebugUserPrompt>["trim"] = null;
+  let userPrompt: string;
+  if (args.flow === "debug" && debugBody) {
+    const built = buildDebugUserPrompt({
+      contract: debugBody.contract,
+      errorContext: combineErrorContext(debugBody.errorContext, preLint),
+      priorAttempts,
+    });
+    userPrompt = built.prompt;
+    promptTrim = built.trim;
+  } else {
+    userPrompt = buildGenerateUserPrompt({
+      description: (body as GenerateBody).description,
+    });
+  }
 
   // Hash IP up front — used by both tiers for logging, only by free tier
   // for rate-limit keying.
@@ -358,6 +426,23 @@ export async function runLLM(args: Args): Promise<RunResult> {
       headers: { "x-genforge-tier": "n/a" },
     };
   }
+
+  // Surface refix prompt trim events (counts only, never source) before we
+  // commit to either tier — the trim is independent of where we route the
+  // call.
+  if (promptTrim) {
+    log({
+      event: "debug_prompt_trim",
+      ipHash,
+      flow,
+      attemptCount: promptTrim.attemptCount,
+      bytesBefore: promptTrim.bytesBefore,
+      bytesAfter: promptTrim.bytesAfter,
+      level: promptTrim.level,
+    });
+  }
+
+  const attemptIndex = priorAttempts?.length ?? 0;
 
   // ─── BYOK path ──────────────────────────────────────────────────────────
   if (body.byok) {
@@ -412,6 +497,7 @@ export async function runLLM(args: Args): Promise<RunResult> {
         latencyMs: Date.now() - t0,
         inputTokens: usage?.inputTokens,
         outputTokens: usage?.outputTokens,
+        attemptIndex,
       });
       return {
         status: 200,
@@ -435,6 +521,7 @@ export async function runLLM(args: Args): Promise<RunResult> {
         status,
         latencyMs: Date.now() - t0,
         reason,
+        attemptIndex,
       });
       return {
         status,
@@ -558,6 +645,7 @@ export async function runLLM(args: Args): Promise<RunResult> {
       latencyMs: Date.now() - t0,
       inputTokens: usage?.inputTokens,
       outputTokens: usage?.outputTokens,
+      attemptIndex,
     });
     return {
       status: 200,
@@ -583,6 +671,7 @@ export async function runLLM(args: Args): Promise<RunResult> {
       status,
       latencyMs: Date.now() - t0,
       reason: e instanceof LLMError ? `gemini_${e.status ?? "error"}` : "free_unexpected",
+      attemptIndex,
     });
     return {
       status: status >= 500 ? 503 : status,

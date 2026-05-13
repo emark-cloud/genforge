@@ -530,16 +530,142 @@ export function buildSystemPrompt(flow: Flow): string {
   return `${CORE}\n\n${schema}`;
 }
 
+/** One iteration of the refix chain. The most-recent entry's `fixed_code` is
+ * the candidate that actually failed in Studio; older entries are kept as
+ * trajectory so the model doesn't re-propose discarded ideas. */
+export type DebugAttempt = {
+  fixed_code: string;
+  explanation: string;
+  error: string;
+};
+
+/** What `buildDebugUserPrompt` did to the prior-attempts chain to keep the
+ * prompt within budget. Surfaces as a `debug_prompt_trim` log line — counts
+ * only, never source. */
+export type PromptTrim = {
+  attemptCount: number;
+  bytesBefore: number;
+  bytesAfter: number;
+  level: "explanation" | "body" | "byte_budget";
+};
+
+type AttemptMode = "full" | "no_explanation" | "error_only";
+
+const PROMPT_BUDGET_BYTES = 40 * 1024;
+
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+function renderAttempt(a: DebugAttempt, idx: number, mode: AttemptMode): string {
+  const err = a.error.trim() || "(none provided)";
+  if (mode === "error_only") {
+    return `### Attempt ${idx + 1} — Error: ${err}`;
+  }
+  const parts = [`### Attempt ${idx + 1}`, `- Error reported: ${err}`];
+  if (mode === "full") {
+    const expl = a.explanation.trim() || "(none provided)";
+    parts.push(`- Your explanation: ${expl}`);
+  }
+  parts.push("- Your fix:", "```python", a.fixed_code, "```");
+  return parts.join("\n");
+}
+
+function assemblePrompt(args: {
+  contract: string;
+  errorContext: string | null;
+  priorAttempts: DebugAttempt[];
+  modes: AttemptMode[];
+}): string {
+  const { contract, errorContext, priorAttempts, modes } = args;
+  const errorBlock =
+    errorContext && errorContext.trim().length > 0
+      ? `## What went wrong${priorAttempts.length > 0 ? " (latest iteration)" : ""}\n\n${errorContext.trim()}\n\n`
+      : "";
+
+  if (priorAttempts.length === 0) {
+    return `${errorBlock}## Contract to fix\n\n\`\`\`python\n${contract}\n\`\`\`\n\nReturn the corrected contract per the Debug output schema.`;
+  }
+
+  const historyLines = ["## Prior attempts in this session", ""];
+  for (let i = 0; i < priorAttempts.length; i++) {
+    historyLines.push(renderAttempt(priorAttempts[i], i, modes[i]));
+    historyLines.push("");
+  }
+  const historyBlock = historyLines.join("\n");
+
+  const latest = priorAttempts[priorAttempts.length - 1];
+  const candidateBlock = `## Latest candidate that still failed\n\n\`\`\`python\n${latest.fixed_code}\n\`\`\`\n\n`;
+  const originalBlock = `## Original contract (user paste)\n\n\`\`\`python\n${contract}\n\`\`\`\n\n`;
+
+  return `${errorBlock}${historyBlock}\n${candidateBlock}${originalBlock}Revise the latest candidate to address the new error. Keep changes minimal — do not re-introduce prior bugs. Return the corrected contract per the Debug output schema.`;
+}
+
 export function buildDebugUserPrompt(args: {
   contract: string;
   errorContext?: string | null;
-}): string {
-  const { contract, errorContext } = args;
-  const errorBlock =
-    errorContext && errorContext.trim().length > 0
-      ? `## What went wrong\n\n${errorContext.trim()}\n\n`
-      : "";
-  return `${errorBlock}## Contract to fix\n\n\`\`\`python\n${contract}\n\`\`\`\n\nReturn the corrected contract per the Debug output schema.`;
+  priorAttempts?: DebugAttempt[] | null;
+}): { prompt: string; trim: PromptTrim | null } {
+  const contract = args.contract;
+  const errorContext = args.errorContext ?? null;
+  const priorAttempts = args.priorAttempts ?? [];
+  const n = priorAttempts.length;
+
+  if (n === 0) {
+    return {
+      prompt: assemblePrompt({ contract, errorContext, priorAttempts: [], modes: [] }),
+      trim: null,
+    };
+  }
+
+  // Default modes: most-recent 3 attempts in full, next 2 drop explanation,
+  // older than 5 keep only error. (Soft cap at 5 per the plan.)
+  const modes: AttemptMode[] = priorAttempts.map((_, i) => {
+    const dist = n - 1 - i;
+    if (dist < 3) return "full";
+    if (dist < 5) return "no_explanation";
+    return "error_only";
+  });
+
+  const fullModes: AttemptMode[] = priorAttempts.map(() => "full");
+  const bytesBefore = utf8Bytes(
+    assemblePrompt({ contract, errorContext, priorAttempts, modes: fullModes }),
+  );
+
+  let prompt = assemblePrompt({ contract, errorContext, priorAttempts, modes });
+  let bytesAfter = utf8Bytes(prompt);
+  let level: PromptTrim["level"] | null = modes.every((m) => m === "full")
+    ? null
+    : modes.some((m) => m === "error_only")
+      ? "body"
+      : "explanation";
+
+  // Byte-budget safety net: walk from oldest, demoting one tier at a time
+  // until the prompt fits. Never demote the most recent attempt past
+  // "no_explanation" so the model always sees the latest fix in full.
+  let i = 0;
+  while (bytesAfter > PROMPT_BUDGET_BYTES && i < n - 1) {
+    if (modes[i] === "full") {
+      modes[i] = "no_explanation";
+      level = "byte_budget";
+    } else if (modes[i] === "no_explanation") {
+      modes[i] = "error_only";
+      level = "byte_budget";
+    } else {
+      i++;
+      continue;
+    }
+    prompt = assemblePrompt({ contract, errorContext, priorAttempts, modes });
+    bytesAfter = utf8Bytes(prompt);
+  }
+
+  return {
+    prompt,
+    trim:
+      level === null
+        ? null
+        : { attemptCount: n, bytesBefore, bytesAfter, level },
+  };
 }
 
 export function buildGenerateUserPrompt(args: { description: string }): string {

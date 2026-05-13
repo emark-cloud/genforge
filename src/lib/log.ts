@@ -24,7 +24,8 @@ export type LogEvent = {
     | "rate_limit_block"
     | "circuit_open"
     | "circuit_block"
-    | "lint";
+    | "lint"
+    | "debug_prompt_trim";
   /** ISO-8601 timestamp set by the logger. */
   ts?: string;
   /** Hashed client IP (see `lib/ip.ts`). Never the raw IP. */
@@ -46,6 +47,14 @@ export type LogEvent = {
   warnCount?: number;
   /** Lint event only — which side of the pipeline this lint ran on. */
   stage?: "pre" | "post";
+  /** Refix chain depth. 0 = first Fix; N = Nth Refix iteration. Attached to
+   * llm_success / llm_failure on the debug flow. */
+  attemptIndex?: number;
+  /** debug_prompt_trim only — counts and byte sizes, never source. */
+  attemptCount?: number;
+  bytesBefore?: number;
+  bytesAfter?: number;
+  level?: "explanation" | "body" | "byte_budget";
 };
 
 /** Generic catch for accidental forbidden keys. The intersection with

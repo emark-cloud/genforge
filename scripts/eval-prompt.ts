@@ -272,7 +272,7 @@ async function runDebug(c: DebugCase): Promise<Result> {
   try {
     const text = await callGemini(
       buildSystemPrompt("debug"),
-      buildDebugUserPrompt({ contract: c.contract, errorContext: c.errorContext })
+      buildDebugUserPrompt({ contract: c.contract, errorContext: c.errorContext }).prompt
     );
     const parsed = tryParseJson(text);
     if (!parsed || typeof parsed !== "object") {

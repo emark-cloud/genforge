@@ -5,7 +5,7 @@ import { Wrench, AlertCircle } from "lucide-react";
 import { Editor } from "./Editor";
 import { Spinner } from "./Spinner";
 import { EmptyOutput } from "./EmptyOutput";
-import { DebugOutput, type DebugResult } from "./DebugOutput";
+import { DebugOutput, type DebugAttempt, type DebugResult } from "./DebugOutput";
 import { isExhausted } from "./FreeTierIndicator";
 import { readQuotaHeaders, type Quota } from "@/lib/quota";
 import type { ActiveByok } from "@/lib/keys";
@@ -32,6 +32,11 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
   // The contract value at the moment of the call — so the diff doesn't shift
   // if the user edits the input after firing.
   const [submitted, setSubmitted] = useState("");
+  // Refix memory: chain of (error → fix) iterations. Reset only on a fresh
+  // Fix click. `diffBase` is what the output-side diff compares against —
+  // the user's paste on the first fix, the prior fix on each refix.
+  const [attempts, setAttempts] = useState<DebugAttempt[]>([]);
+  const [diffBase, setDiffBase] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const exhausted = isExhausted(byok, quota);
@@ -41,6 +46,8 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
     if (!canFix) return;
     setBusy(true);
     setError(null);
+    // Reset the refix chain — this is the ONLY place attempts get cleared.
+    setAttempts([]);
     try {
       const body: Record<string, unknown> = { contract };
       if (errorContext.trim()) body.errorContext = errorContext;
@@ -83,14 +90,99 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
         setError(warning);
         return;
       }
+      const fix = json as DebugResult;
       setSubmitted(contract);
-      setResult(json as DebugResult);
+      setDiffBase(contract);
+      setResult(fix);
+      setAttempts([
+        {
+          fixed_code: fix.fixed_code,
+          explanation: fix.explanation ?? "",
+          error: errorContext.trim(),
+        },
+      ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network error");
     } finally {
       setBusy(false);
     }
   }, [canFix, byok, contract, errorContext, onQuotaUpdate]);
+
+  const runRefix = useCallback(
+    async (newError: string): Promise<{ ok: boolean; error?: string }> => {
+      if (attempts.length === 0 || result == null) {
+        return { ok: false, error: "Run a Fix first." };
+      }
+      // Toggle the parent busy flag so the input-side Fix button is disabled
+      // while a refix is in flight — otherwise a mid-refix Fix click would
+      // clear `attempts` and race the refix's setState callback.
+      setBusy(true);
+      try {
+        const body: Record<string, unknown> = {
+          contract: submitted,
+          errorContext: newError,
+          priorAttempts: attempts,
+        };
+        if (byok) body.byok = { provider: byok.provider, key: byok.key, model: byok.model };
+        const res = await fetch("/api/debug", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const q = readQuotaHeaders(res.headers);
+        if (q) onQuotaUpdate(q);
+        const text = await res.text();
+        let json: unknown = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          /* leave null */
+        }
+        if (!res.ok) {
+          const msg =
+            (json && typeof json === "object" && "error" in json && typeof (json as { error: unknown }).error === "string"
+              ? (json as { error: string }).error
+              : null) ?? `Request failed (${res.status})`;
+          return { ok: false, error: msg };
+        }
+        if (
+          !json ||
+          typeof json !== "object" ||
+          !("fixed_code" in json) ||
+          typeof (json as { fixed_code: unknown }).fixed_code !== "string"
+        ) {
+          const warning =
+            json &&
+            typeof json === "object" &&
+            "warning" in json &&
+            typeof (json as { warning: unknown }).warning === "string"
+              ? (json as { warning: string }).warning
+              : "Model returned unexpected JSON. Try a more specific error.";
+          return { ok: false, error: warning };
+        }
+        const next = json as DebugResult;
+        // The candidate that just failed becomes the new diff base — so the
+        // user sees only what this iteration changed (per UX decision).
+        const prevFix = attempts[attempts.length - 1].fixed_code;
+        setDiffBase(prevFix);
+        setResult(next);
+        setAttempts((cur) => [
+          ...cur,
+          {
+            fixed_code: next.fixed_code,
+            explanation: next.explanation ?? "",
+            error: newError.trim(),
+          },
+        ]);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+      } finally {
+        setBusy(false);
+      }
+    },
+    [attempts, result, submitted, byok, onQuotaUpdate],
+  );
 
   // ⌘+Enter / Ctrl+Enter to fire while focus is inside the input column.
   const onInputKey = (e: React.KeyboardEvent) => {
@@ -170,7 +262,13 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
       {/* Output side */}
       <div className="min-h-0">
         {result ? (
-          <DebugOutput original={submitted} result={result} />
+          <DebugOutput
+            diffBase={diffBase}
+            result={result}
+            attempts={attempts}
+            onRefix={runRefix}
+            refixDisabled={busy || exhausted}
+          />
         ) : (
           <EmptyOutput hint="Paste a contract on the left and hit Fix." />
         )}
