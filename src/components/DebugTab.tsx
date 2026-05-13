@@ -1,14 +1,22 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Wrench, AlertCircle } from "lucide-react";
+import { Wrench, AlertCircle, ScanSearch } from "lucide-react";
 import { Editor } from "./Editor";
 import { Spinner } from "./Spinner";
 import { EmptyOutput } from "./EmptyOutput";
 import { DebugOutput, type DebugAttempt, type DebugResult } from "./DebugOutput";
+import { LintPill } from "./LintPill";
 import { isExhausted } from "./FreeTierIndicator";
 import { readQuotaHeaders, type Quota } from "@/lib/quota";
 import type { ActiveByok } from "@/lib/keys";
+import type { LintSummary } from "@/lib/lint";
+
+type ScanResult = {
+  lint: LintSummary;
+  summary: string | null;
+  summaryError?: string;
+};
 
 const STARTER_CONTRACT = `# v0.1.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
@@ -39,8 +47,23 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
   const [diffBase, setDiffBase] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const exhausted = isExhausted(byok, quota);
-  const canFix = !busy && !exhausted && contract.trim().length > 0;
+  const canFix = !busy && !scanBusy && !exhausted && contract.trim().length > 0;
+  const canScan = !busy && !scanBusy && contract.trim().length > 0;
+
+  const handleContractChange = useCallback(
+    (next: string) => {
+      setContract(next);
+      // Markers + summary pinned to the previous source — clear them so
+      // the user isn't looking at squiggles on lines that no longer match.
+      if (scanResult !== null) setScanResult(null);
+      if (scanError !== null) setScanError(null);
+    },
+    [scanResult, scanError],
+  );
 
   const runFix = useCallback(async () => {
     if (!canFix) return;
@@ -101,12 +124,66 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
           error: errorContext.trim(),
         },
       ]);
+      // Once Fix runs, diagnostic UI moves to the output side's LintPill;
+      // editor markers from a prior Scan would now be stale.
+      setScanResult(null);
+      setScanError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network error");
     } finally {
       setBusy(false);
     }
   }, [canFix, byok, contract, errorContext, onQuotaUpdate]);
+
+  const runScan = useCallback(async () => {
+    if (!canScan) return;
+    setScanBusy(true);
+    setScanError(null);
+    try {
+      const body: Record<string, unknown> = { contract };
+      if (byok) body.byok = { provider: byok.provider, key: byok.key, model: byok.model };
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let json: unknown = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        /* leave null */
+      }
+      if (!res.ok) {
+        const msg =
+          (json && typeof json === "object" && "error" in json && typeof (json as { error: unknown }).error === "string"
+            ? (json as { error: string }).error
+            : null) ?? `Scan failed (${res.status})`;
+        setScanError(msg);
+        return;
+      }
+      if (
+        !json ||
+        typeof json !== "object" ||
+        !("lint" in json) ||
+        typeof (json as { lint: unknown }).lint !== "object"
+      ) {
+        setScanError("Scan returned an unexpected response.");
+        return;
+      }
+      const parsed = json as ScanResult;
+      setScanResult({
+        lint: parsed.lint,
+        summary: typeof parsed.summary === "string" ? parsed.summary : null,
+        summaryError:
+          typeof parsed.summaryError === "string" ? parsed.summaryError : undefined,
+      });
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setScanBusy(false);
+    }
+  }, [canScan, byok, contract]);
 
   const runRefix = useCallback(
     async (newError: string): Promise<{ ok: boolean; error?: string }> => {
@@ -208,10 +285,29 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
         <div className="min-h-0 flex-1">
           <Editor
             value={contract}
-            onChange={setContract}
+            onChange={handleContractChange}
             ariaLabel="Contract source"
+            markers={scanResult?.lint.issues ?? null}
+            markerErrorBoundary={scanResult?.lint.errorCount ?? 0}
           />
         </div>
+        {scanResult && (
+          <div className="flex flex-col gap-[var(--space-2)] rounded-[var(--radius-md)] border border-subtle bg-card px-[var(--space-3)] py-[var(--space-3)]">
+            <div className="flex items-center justify-between gap-[var(--space-3)]">
+              <span className="label-caps">Scan summary</span>
+              <LintPill lint={scanResult.lint} />
+            </div>
+            {scanResult.lint.ok ? (
+              <p className="text-sm text-secondary">
+                No issues found.
+              </p>
+            ) : scanResult.summary ? (
+              <p className="text-sm text-primary leading-relaxed">{scanResult.summary}</p>
+            ) : scanResult.summaryError ? (
+              <p className="text-sm text-tertiary">{scanResult.summaryError}</p>
+            ) : null}
+          </div>
+        )}
         <div className="flex flex-col gap-[var(--space-2)]">
           <label htmlFor="error-context" className="label-caps">
             What went wrong{" "}
@@ -243,6 +339,21 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
               </>
             )}
           </button>
+          <button
+            type="button"
+            onClick={runScan}
+            disabled={!canScan}
+            className="inline-flex items-center justify-center gap-[var(--space-2)] h-10 min-w-[120px] rounded-[var(--radius-pill)] border border-default bg-transparent px-[var(--space-5)] text-base font-medium text-secondary transition-colors duration-[var(--duration-fast)] hover:border-strong hover:text-primary disabled:opacity-40 disabled:hover:border-default disabled:hover:text-secondary disabled:cursor-not-allowed"
+          >
+            {scanBusy ? (
+              <Spinner className="text-secondary" />
+            ) : (
+              <>
+                <ScanSearch size={14} aria-hidden="true" />
+                Scan
+              </>
+            )}
+          </button>
           <span className="text-xs text-tertiary">
             <span className="font-mono">⌘</span>+
             <span className="font-mono">Enter</span> to fire
@@ -255,6 +366,15 @@ export function DebugTab({ byok, quota, onQuotaUpdate }: Props) {
           >
             <AlertCircle size={14} className="mt-[2px] shrink-0" aria-hidden="true" />
             <span>{error}</span>
+          </div>
+        )}
+        {scanError && (
+          <div
+            role="alert"
+            className="flex items-start gap-[var(--space-2)] rounded-[var(--radius-md)] border border-subtle bg-card px-[var(--space-3)] py-[var(--space-2)] text-sm text-[var(--error)]"
+          >
+            <AlertCircle size={14} className="mt-[2px] shrink-0" aria-hidden="true" />
+            <span>{scanError}</span>
           </div>
         )}
       </div>

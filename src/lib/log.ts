@@ -25,7 +25,8 @@ export type LogEvent = {
     | "circuit_open"
     | "circuit_block"
     | "lint"
-    | "debug_prompt_trim";
+    | "debug_prompt_trim"
+    | "scan";
   /** ISO-8601 timestamp set by the logger. */
   ts?: string;
   /** Hashed client IP (see `lib/ip.ts`). Never the raw IP. */

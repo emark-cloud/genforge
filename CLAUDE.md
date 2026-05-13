@@ -127,6 +127,7 @@ See `.env.example`. Summary:
 | `SERVER_LLM_MODEL` | e.g. `gemini-2.5-flash`. |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Rate-limit store. |
 | `FREE_TIER_DAILY_LIMIT` | Per-IP daily request cap. Default `5`. |
+| `FREE_TIER_SCAN_DAILY_LIMIT` | Per-IP daily request cap for `/api/scan` (separate counter from `FREE_TIER_DAILY_LIMIT`). Default `20`. |
 | `SERVER_LLM_DAILY_REQUEST_CAP` | Global daily request ceiling for the free tier. |
 | `SERVER_LLM_DAILY_USD_CAP` | Global daily USD ceiling for the free tier. |
 | `IP_HASH_SALT` | Salt for sha256 hashing IPs in logs. |

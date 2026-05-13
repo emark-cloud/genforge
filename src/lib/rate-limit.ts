@@ -20,6 +20,7 @@
 import { getRedis, secondsUntilUtcMidnight, todayKey } from "./redis";
 
 const DEFAULT_FREE_TIER_DAILY_LIMIT = 5;
+const DEFAULT_FREE_TIER_SCAN_DAILY_LIMIT = 20;
 const DEFAULT_GLOBAL_REQUEST_CAP = 500;
 const DEFAULT_GLOBAL_USD_CAP = 5;
 
@@ -159,5 +160,102 @@ export async function peekRemaining(ipHash: string): Promise<{
   const day = todayKey();
   const current =
     (await redis.get<number>(`ratelimit:ip:${ipHash}:${day}`)) ?? 0;
+  return { ipRemaining: Math.max(0, ipLimit - current), ipLimit };
+}
+
+/**
+ * Reserves one Scan slot. Mirrors `checkAndReserve` but with a separate
+ * per-IP counter (`ratelimit:ip:scan:…`) so Scan doesn't burn the user's
+ * free LLM quota. The same global request + USD ceilings apply — a scan
+ * still spends an LLM call when issues are found, so it should count
+ * toward the same per-day budget protection.
+ */
+export async function checkAndReserveScan(ipHash: string): Promise<LimitDecision> {
+  const ipLimit = envInt(
+    "FREE_TIER_SCAN_DAILY_LIMIT",
+    DEFAULT_FREE_TIER_SCAN_DAILY_LIMIT,
+  );
+  const globalRequestCap = envInt(
+    "SERVER_LLM_DAILY_REQUEST_CAP",
+    DEFAULT_GLOBAL_REQUEST_CAP,
+  );
+  const globalUsdCap = envFloat(
+    "SERVER_LLM_DAILY_USD_CAP",
+    DEFAULT_GLOBAL_USD_CAP,
+  );
+
+  const redis = getRedis();
+  const day = todayKey();
+  const ttl = secondsUntilUtcMidnight();
+
+  const ipKey = `ratelimit:ip:scan:${ipHash}:${day}`;
+  const reqKey = `ratelimit:global:requests:${day}`;
+  const usdKey = `ratelimit:global:usd:${day}`;
+
+  const usdRaw = await redis.get<string | number>(usdKey);
+  const usdSoFar =
+    typeof usdRaw === "number"
+      ? usdRaw
+      : usdRaw
+        ? Number.parseFloat(String(usdRaw))
+        : 0;
+  if (Number.isFinite(usdSoFar) && usdSoFar >= globalUsdCap) {
+    const current = (await redis.get<number>(ipKey)) ?? 0;
+    return {
+      allow: false,
+      reason: "global_usd",
+      status: 429,
+      ipRemaining: Math.max(0, ipLimit - current),
+      ipLimit,
+    };
+  }
+
+  const ipCount = await redis.incr(ipKey);
+  await redis.expire(ipKey, ttl);
+  if (ipCount > ipLimit) {
+    await redis.decr(ipKey);
+    return {
+      allow: false,
+      reason: "per_ip",
+      status: 429,
+      ipRemaining: 0,
+      ipLimit,
+    };
+  }
+
+  const reqCount = await redis.incr(reqKey);
+  await redis.expire(reqKey, ttl);
+  if (reqCount > globalRequestCap) {
+    await redis.decr(ipKey);
+    await redis.decr(reqKey);
+    return {
+      allow: false,
+      reason: "global_requests",
+      status: 429,
+      ipRemaining: Math.max(0, ipLimit - (ipCount - 1)),
+      ipLimit,
+    };
+  }
+
+  return {
+    allow: true,
+    ipRemaining: Math.max(0, ipLimit - ipCount),
+    ipLimit,
+  };
+}
+
+/** Read-only view of remaining scan slots for this IP today. */
+export async function peekScanRemaining(ipHash: string): Promise<{
+  ipRemaining: number;
+  ipLimit: number;
+}> {
+  const ipLimit = envInt(
+    "FREE_TIER_SCAN_DAILY_LIMIT",
+    DEFAULT_FREE_TIER_SCAN_DAILY_LIMIT,
+  );
+  const redis = getRedis();
+  const day = todayKey();
+  const current =
+    (await redis.get<number>(`ratelimit:ip:scan:${ipHash}:${day}`)) ?? 0;
   return { ipRemaining: Math.max(0, ipLimit - current), ipLimit };
 }
