@@ -36,8 +36,8 @@ BYOK requests don't touch the server key or KV — they go straight from the bro
 ## Project layout
 
 ```
-app/                   ← Next.js App Router (pages + API routes)
 src/
+  app/                 ← Next.js App Router (pages + API routes)
   components/          ← UI: Topbar, Rail, Tabs, Editor, DiffView, ...
   lib/
     providers/         ← anthropic.ts, openai.ts, gemini.ts
@@ -46,6 +46,8 @@ src/
     circuit.ts         ← 5xx breaker for the free-tier provider
     keys.ts            ← BYOK localStorage helpers
   styles/globals.css   ← design tokens (colors, type, spacing)
+lint-service/          ← Python FastAPI sidecar wrapping genvm-lint.
+                         Deployed separately (Railway). See its README.
 SPEC.md                ← functional spec
 DESIGN.md              ← visual + interaction language
 GUIDELINES.md          ← GenLayer contract patterns the prompt teaches
